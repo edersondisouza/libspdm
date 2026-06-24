@@ -124,3 +124,62 @@ bool libspdm_write_output_file(const char *file_name, const void *file_data,
     ARG_UNUSED(file_size);
     return false;
 }
+
+/*
+ * libspdm_dump_hex_str is declared by libspdm_device_secret_lib.h and is
+ * normally provided by the host application (spdm-emu's support.c). The
+ * sample device-secret library calls it from a few diagnostic paths
+ * (PSK derivation, slot-key dump). Provide a minimal printk-based
+ * implementation so we don't pull in stdio dependencies.
+ */
+void libspdm_dump_hex_str(const uint8_t *buffer, size_t buffer_size)
+{
+    for (size_t i = 0; i < buffer_size; i++) {
+        printk("%02x", buffer[i]);
+    }
+}
+
+/*
+ * Three small responder hooks that the libspdm responder dispatcher
+ * links unconditionally (set-cert / get-cert paths). On Zephyr we
+ * deliberately have no persistent NVM and no trusted environment, so
+ * report that and let libspdm respond with an SPDM error to the peer
+ * if these flows are exercised.
+ */
+bool libspdm_is_in_trusted_environment(void *spdm_context)
+{
+    ARG_UNUSED(spdm_context);
+    return false;
+}
+
+bool libspdm_write_certificate_to_nvm(void *spdm_context,
+                                      uint8_t slot_id, const void *cert_chain,
+                                      size_t cert_chain_size,
+                                      uint32_t base_hash_algo,
+                                      uint32_t base_asym_algo,
+                                      uint32_t pqc_asym_algo,
+                                      bool *need_reset, bool *is_busy)
+{
+    ARG_UNUSED(spdm_context);
+    ARG_UNUSED(slot_id);
+    ARG_UNUSED(cert_chain);
+    ARG_UNUSED(cert_chain_size);
+    ARG_UNUSED(base_hash_algo);
+    ARG_UNUSED(base_asym_algo);
+    ARG_UNUSED(pqc_asym_algo);
+    if (need_reset) {
+        *need_reset = false;
+    }
+    if (is_busy) {
+        *is_busy = false;
+    }
+    return false;
+}
+
+uint32_t libspdm_get_cert_chain_slot_storage_size(void *spdm_context,
+                                                  uint8_t slot_id)
+{
+    ARG_UNUSED(spdm_context);
+    ARG_UNUSED(slot_id);
+    return 0;
+}

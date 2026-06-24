@@ -1,0 +1,138 @@
+/**
+ *  Copyright Notice:
+ *  Copyright 2026 DMTF. All rights reserved.
+ *  License: BSD 3-Clause License.
+ **/
+
+/*
+ * SPDM responder thread for the libspdm Zephyr loopback demo.
+ *
+ * Builds a libspdm context, configures responder capabilities and
+ * the loopback transport, then loops on libspdm_responder_dispatch_message()
+ * forever. The thread terminates the loop only on a non-recoverable error.
+ */
+
+#include <stdlib.h>
+#include <string.h>
+
+#include <zephyr/kernel.h>
+#include <zephyr/sys/printk.h>
+
+#include "library/spdm_common_lib.h"
+#include "library/spdm_responder_lib.h"
+#include "hal/library/memlib.h"
+#include "industry_standard/spdm.h"
+
+#include "spdm_loopback.h"
+
+void *responder_spdm_context;
+void *responder_scratch;
+
+static void configure_responder(void *ctx)
+{
+    libspdm_data_parameter_t parameter;
+    uint8_t  u8;
+    uint16_t u16;
+    uint32_t u32;
+    spdm_version_number_t version;
+
+    libspdm_zero_mem(&parameter, sizeof(parameter));
+    parameter.location = LIBSPDM_DATA_LOCATION_LOCAL;
+
+    /* Advertise SPDM 1.2 only -- plenty for GET_VERSION /
+     * GET_CAPABILITIES / NEGOTIATE_ALGORITHMS. */
+    version = SPDM_MESSAGE_VERSION_12 << SPDM_VERSION_NUMBER_SHIFT_BIT;
+    libspdm_set_data(ctx, LIBSPDM_DATA_SPDM_VERSION, &parameter,
+                     &version, sizeof(version));
+
+    u8 = 0;
+    libspdm_set_data(ctx, LIBSPDM_DATA_CAPABILITY_CT_EXPONENT, &parameter,
+                     &u8, sizeof(u8));
+
+    /* Minimum responder cap flags: CERT + CHAL. Even with the null
+     * crypto backend the capability negotiation handshake itself runs
+     * purely on byte exchange. MEAS_CAP_SIG requires a configured
+     * measurement_hash_algo, so we leave it off for the
+     * VERSION/CAPS/ALGS milestone. */
+    u32 = SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_CERT_CAP |
+          SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_CHAL_CAP;
+    libspdm_set_data(ctx, LIBSPDM_DATA_CAPABILITY_FLAGS, &parameter,
+                     &u32, sizeof(u32));
+
+    /* Algorithms to advertise. Match what the requester proposes. */
+    /* MEAS_CAP is off, so measurement_spec / measurement_hash_algo
+     * must both be 0 (libspdm asserts the XOR). */
+    u8 = 0;
+    libspdm_set_data(ctx, LIBSPDM_DATA_MEASUREMENT_SPEC, &parameter,
+                     &u8, sizeof(u8));
+    u32 = SPDM_ALGORITHMS_BASE_ASYM_ALGO_TPM_ALG_ECDSA_ECC_NIST_P256;
+    libspdm_set_data(ctx, LIBSPDM_DATA_BASE_ASYM_ALGO, &parameter,
+                     &u32, sizeof(u32));
+    u32 = SPDM_ALGORITHMS_BASE_HASH_ALGO_TPM_ALG_SHA_256;
+    libspdm_set_data(ctx, LIBSPDM_DATA_BASE_HASH_ALGO, &parameter,
+                     &u32, sizeof(u32));
+    u16 = SPDM_ALGORITHMS_DHE_NAMED_GROUP_SECP_256_R1;
+    libspdm_set_data(ctx, LIBSPDM_DATA_DHE_NAME_GROUP, &parameter,
+                     &u16, sizeof(u16));
+    u16 = SPDM_ALGORITHMS_AEAD_CIPHER_SUITE_AES_256_GCM;
+    libspdm_set_data(ctx, LIBSPDM_DATA_AEAD_CIPHER_SUITE, &parameter,
+                     &u16, sizeof(u16));
+    u16 = SPDM_ALGORITHMS_BASE_ASYM_ALGO_TPM_ALG_ECDSA_ECC_NIST_P256;
+    libspdm_set_data(ctx, LIBSPDM_DATA_REQ_BASE_ASYM_ALG, &parameter,
+                     &u16, sizeof(u16));
+    u16 = SPDM_ALGORITHMS_KEY_SCHEDULE_SPDM;
+    libspdm_set_data(ctx, LIBSPDM_DATA_KEY_SCHEDULE, &parameter,
+                     &u16, sizeof(u16));
+    u8 = SPDM_ALGORITHMS_OPAQUE_DATA_FORMAT_1;
+    libspdm_set_data(ctx, LIBSPDM_DATA_OTHER_PARAMS_SUPPORT, &parameter,
+                     &u8, sizeof(u8));
+}
+
+void responder_thread_main(void *a, void *b, void *c)
+{
+    struct mock_transport *t = (struct mock_transport *)a;
+    libspdm_return_t status;
+    size_t scratch_size;
+
+    ARG_UNUSED(b);
+    ARG_UNUSED(c);
+
+    printk("[responder] starting\n");
+
+    responder_spdm_context = malloc(libspdm_get_context_size());
+    if (responder_spdm_context == NULL) {
+        printk("[responder] ctx alloc failed\n");
+        return;
+    }
+    libspdm_init_context(responder_spdm_context);
+
+    mock_transport_install(responder_spdm_context, t);
+    configure_responder(responder_spdm_context);
+
+    scratch_size = libspdm_get_sizeof_required_scratch_buffer(
+        responder_spdm_context);
+    responder_scratch = malloc(scratch_size);
+    if (responder_scratch == NULL) {
+        printk("[responder] scratch alloc failed (%zu)\n", scratch_size);
+        return;
+    }
+    libspdm_set_scratch_buffer(responder_spdm_context,
+                               responder_scratch, scratch_size);
+
+    printk("[responder] ready, scratch=%zu bytes\n", scratch_size);
+
+    while (1) {
+        status = libspdm_responder_dispatch_message(responder_spdm_context);
+        if (status == LIBSPDM_STATUS_SUCCESS) {
+            continue;
+        }
+        if (status == LIBSPDM_STATUS_RECEIVE_FAIL) {
+            /* Peer disappeared -- exit cleanly. */
+            printk("[responder] receive timeout, exiting\n");
+            return;
+        }
+        printk("[responder] dispatch returned 0x%x\n", status);
+        /* Continue: most non-success returns just mean "I sent an
+         * ERROR response, keep going". */
+    }
+}

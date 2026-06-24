@@ -18,6 +18,36 @@ set(LIBSPDM_DIR ${CMAKE_CURRENT_LIST_DIR}/..)
 
 zephyr_library_named(libspdm)
 
+# Disable PQC support across libspdm and its os_stub sample libraries
+# for the initial Zephyr port. The PQC support pulls in ML-DSA / ML-KEM /
+# SLH-DSA primitives that are not yet wired up to Zephyr's mbedtls
+# module. Turning the master knobs off elides the dependent code at
+# compile time, so the same source tree still builds without dragging
+# in unimplemented symbols. PQC can be re-enabled by simply dropping
+# the lines below once a PQC-aware cryptlib backend is integrated.
+set(LIBSPDM_DISABLE_PQC_DEFS
+  LIBSPDM_ML_DSA_44_SUPPORT=0
+  LIBSPDM_ML_DSA_65_SUPPORT=0
+  LIBSPDM_ML_DSA_87_SUPPORT=0
+  LIBSPDM_ML_KEM_512_SUPPORT=0
+  LIBSPDM_ML_KEM_768_SUPPORT=0
+  LIBSPDM_ML_KEM_1024_SUPPORT=0
+  LIBSPDM_SLH_DSA_SHA2_128S_SUPPORT=0
+  LIBSPDM_SLH_DSA_SHA2_128F_SUPPORT=0
+  LIBSPDM_SLH_DSA_SHA2_192S_SUPPORT=0
+  LIBSPDM_SLH_DSA_SHA2_192F_SUPPORT=0
+  LIBSPDM_SLH_DSA_SHA2_256S_SUPPORT=0
+  LIBSPDM_SLH_DSA_SHA2_256F_SUPPORT=0
+  LIBSPDM_SLH_DSA_SHAKE_128S_SUPPORT=0
+  LIBSPDM_SLH_DSA_SHAKE_128F_SUPPORT=0
+  LIBSPDM_SLH_DSA_SHAKE_192S_SUPPORT=0
+  LIBSPDM_SLH_DSA_SHAKE_192F_SUPPORT=0
+  LIBSPDM_SLH_DSA_SHAKE_256S_SUPPORT=0
+  LIBSPDM_SLH_DSA_SHAKE_256F_SUPPORT=0
+)
+zephyr_library_compile_definitions(${LIBSPDM_DISABLE_PQC_DEFS})
+zephyr_compile_definitions(${LIBSPDM_DISABLE_PQC_DEFS})
+
 zephyr_library_include_directories(
   ${LIBSPDM_DIR}/include
   ${LIBSPDM_DIR}/include/hal
@@ -49,10 +79,15 @@ file(GLOB LIBSPDM_COMMON_SRCS    ${LIBSPDM_DIR}/library/spdm_common_lib/*.c)
 file(GLOB LIBSPDM_CRYPT_SRCS     ${LIBSPDM_DIR}/library/spdm_crypt_lib/*.c)
 file(GLOB LIBSPDM_SECMSG_SRCS    ${LIBSPDM_DIR}/library/spdm_secured_message_lib/*.c)
 
+# spdm_crypt_ext_lib provides libspdm_measurement_hash_all() and a few
+# other helpers that the sample device-secret library calls into.
+file(GLOB LIBSPDM_CRYPTEXT_SRCS  ${LIBSPDM_DIR}/os_stub/spdm_crypt_ext_lib/*.c)
+
 zephyr_library_sources(
   ${LIBSPDM_COMMON_SRCS}
   ${LIBSPDM_CRYPT_SRCS}
   ${LIBSPDM_SECMSG_SRCS}
+  ${LIBSPDM_CRYPTEXT_SRCS}
 )
 
 if(CONFIG_LIBSPDM_REQUESTER)
@@ -147,8 +182,10 @@ if(CONFIG_LIBSPDM_SECRET_LIB_SAMPLE)
   # of by spdm-emu's POSIX support.c.
   file(GLOB SECRET_LIB_SAMPLE_SRCS
        ${LIBSPDM_DIR}/os_stub/spdm_device_secret_lib_sample/*.c)
-  # Drop the PQC-only readers; they reference algorithms we excluded above.
-  list(FILTER SECRET_LIB_SAMPLE_SRCS EXCLUDE REGEX "_pqc\\.c$")
+  # Drop set_cert.c -- uses POSIX open/write/close to persist new certs
+  # to /tmp on a hosted OS; libspdm_write_certificate_to_nvm is supplied
+  # by the blob shim and just returns false on Zephyr.
+  list(FILTER SECRET_LIB_SAMPLE_SRCS EXCLUDE REGEX "/set_cert\\.c$")
   zephyr_library_sources(${SECRET_LIB_SAMPLE_SRCS})
 
   zephyr_library_sources(

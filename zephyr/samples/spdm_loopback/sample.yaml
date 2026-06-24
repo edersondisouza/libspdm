@@ -1,0 +1,14 @@
+sample:
+  description: libspdm requester/responder loopback inside a single Zephyr node
+  name: libspdm loopback
+tests:
+  sample.lib.libspdm.loopback:
+    tags: libspdm
+    integration_platforms:
+      - qemu_x86_64
+    platform_allow: qemu_x86_64
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "SPDM handshake \\(version/caps/algs\\) PASSED"
