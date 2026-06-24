@@ -1,0 +1,90 @@
+# Copyright Notice:
+# Copyright 2026 DMTF. All rights reserved.
+# License: BSD 3-Clause License.
+
+menuconfig LIBSPDM
+	bool "libspdm: DMTF SPDM library"
+	help
+	  Enable the libspdm reference implementation of DMTF SPDM
+	  (Security Protocol and Data Model). When enabled, the libspdm
+	  static library is built and made available to the application.
+
+if LIBSPDM
+
+config LIBSPDM_REQUESTER
+	bool "Build SPDM requester role"
+	default y
+
+config LIBSPDM_RESPONDER
+	bool "Build SPDM responder role"
+	default y
+
+choice LIBSPDM_CRYPTO_BACKEND
+	prompt "Crypto backend"
+	default LIBSPDM_CRYPTO_MBEDTLS
+
+config LIBSPDM_CRYPTO_MBEDTLS
+	bool "mbedTLS (Zephyr module)"
+	select MBEDTLS
+	help
+	  Use Zephyr's mbedTLS module as the libspdm crypto backend.
+	  See zephyr/Kconfig.mbedtls for the additional mbedTLS
+	  features auto-selected by this option.
+
+config LIBSPDM_CRYPTO_NULL
+	bool "Null crypto (compile-only, will fail at runtime)"
+
+endchoice
+
+config LIBSPDM_SECRET_LIB_SAMPLE
+	bool "Build the sample device-secret library"
+	default y
+	help
+	  Builds os_stub/spdm_device_secret_lib_sample. On Zephyr the
+	  file-based key/cert loader is replaced by an embedded-blob
+	  registry (see libspdm/zephyr/include/libspdm/zephyr/secret_blob.h);
+	  the application is responsible for registering the blobs at
+	  startup.
+
+menu "Transports"
+
+config LIBSPDM_TRANSPORT_MCTP
+	bool "MCTP transport binding"
+	default y
+
+config LIBSPDM_TRANSPORT_PCI_DOE
+	bool "PCI DOE transport binding"
+
+config LIBSPDM_TRANSPORT_TCP
+	bool "TCP transport binding"
+
+config LIBSPDM_TRANSPORT_STORAGE
+	bool "Storage transport binding"
+
+endmenu
+
+menu "Debug"
+
+config LIBSPDM_DEBUG_ENABLE
+	bool "Enable libspdm debug prints and asserts"
+	default y if DEBUG
+
+config LIBSPDM_DEBUG_BLOCK_ON_ASSERT
+	bool "Block in libspdm_debug_assert (else __ASSERT)"
+	depends on LIBSPDM_DEBUG_ENABLE
+
+endmenu
+
+config LIBSPDM_MAX_SESSION_COUNT
+	int "Maximum concurrent SPDM sessions"
+	default 4
+	range 1 16
+
+config LIBSPDM_MAX_CERT_CHAIN_SIZE
+	int "Maximum certificate chain size (bytes)"
+	default 4096
+
+# mbedTLS feature requirements pulled in when LIBSPDM_CRYPTO_MBEDTLS=y.
+rsource "Kconfig.mbedtls"
+
+endif # LIBSPDM
