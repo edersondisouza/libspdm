@@ -18,6 +18,15 @@ set(LIBSPDM_DIR ${CMAKE_CURRENT_LIST_DIR}/..)
 
 zephyr_library_named(libspdm)
 
+# libspdm's own CMake (the upstream host build) suppresses
+# -Wmaybe-uninitialized / -Wuninitialized because there are a number
+# of known false positives in spdm_{requester,responder}_lib where the
+# uninitialised path is guarded by an earlier error return. Zephyr's
+# default warning profile is stricter and re-surfaces them, so mirror
+# upstream's policy on this library only. Compile-options on the
+# zephyr_library scope don't leak into the application.
+zephyr_library_compile_options(-Wno-maybe-uninitialized -Wno-uninitialized)
+
 # Disable PQC support across libspdm and its os_stub sample libraries
 # for the initial Zephyr port. The PQC support pulls in ML-DSA / ML-KEM /
 # SLH-DSA primitives that are not yet wired up to Zephyr's mbedtls
