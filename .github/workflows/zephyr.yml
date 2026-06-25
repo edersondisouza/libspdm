@@ -75,7 +75,10 @@ jobs:
                 import:
                   name-allowlist:
                     - cmsis
+                    - cmsis_6
+                    - hal_nuvoton
                     - hal_x86
+                    - libmctp
                     - mbedtls
                     - picolibc
                     - segger
@@ -88,12 +91,13 @@ jobs:
           west init -l manifest
           west update --narrow -o=--depth=1
 
-      - name: Run twister on the libspdm loopback sample
+      - name: Run twister on the libspdm samples
         run: |
           cd /workdir/zephyrproject
-          export ZEPHYR_MODULES="${GITHUB_WORKSPACE}/libspdm"
+          export ZEPHYR_EXTRA_MODULES="${GITHUB_WORKSPACE}/libspdm"
           $ZEPHYR_BASE/scripts/twister \
             -p qemu_x86_64 \
+            -p npcx4m8f_evb \
             -T "${GITHUB_WORKSPACE}/libspdm/zephyr/samples" \
             --inline-logs \
             -v

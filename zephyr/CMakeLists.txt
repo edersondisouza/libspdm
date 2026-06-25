@@ -34,6 +34,10 @@ zephyr_library_compile_options(-Wno-maybe-uninitialized -Wno-uninitialized)
 # compile time, so the same source tree still builds without dragging
 # in unimplemented symbols. PQC can be re-enabled by simply dropping
 # the lines below once a PQC-aware cryptlib backend is integrated.
+#
+# We also override SPDM_MAX_PUBLIC_KEY_INFO_LEN below for the same
+# RAM-budget reason the spec ceiling of 65535 produces a 1.5 MiB
+# m_key_pair_info array in the sample device-secret library.
 set(LIBSPDM_DISABLE_PQC_DEFS
   LIBSPDM_ML_DSA_44_SUPPORT=0
   LIBSPDM_ML_DSA_65_SUPPORT=0
@@ -54,6 +58,14 @@ set(LIBSPDM_DISABLE_PQC_DEFS
   LIBSPDM_SLH_DSA_SHAKE_256S_SUPPORT=0
   LIBSPDM_SLH_DSA_SHAKE_256F_SUPPORT=0
 )
+
+# Override SPDM_MAX_PUBLIC_KEY_INFO_LEN. The spec ceiling of 65535
+# would produce a 1.5 MiB m_key_pair_info array in the sample
+# device-secret library and a 64 KiB stack frame in the requester's
+# GET_KEY_PAIR_INFO handler -- neither fits a typical Zephyr target.
+# 1024 bytes is comfortably above any traditional asymmetric
+# SubjectPublicKeyInfo we'd carry (RSA-4096 SPKI is ~550 bytes).
+list(APPEND LIBSPDM_DISABLE_PQC_DEFS SPDM_MAX_PUBLIC_KEY_INFO_LEN=1024)
 zephyr_library_compile_definitions(${LIBSPDM_DISABLE_PQC_DEFS})
 zephyr_compile_definitions(${LIBSPDM_DISABLE_PQC_DEFS})
 
@@ -200,4 +212,11 @@ if(CONFIG_LIBSPDM_SECRET_LIB_SAMPLE)
   zephyr_library_sources(
     ${CMAKE_CURRENT_LIST_DIR}/src/secret_blob.c
   )
+endif()
+
+# ----------------------------------------------------------------------------
+# libspdm <-> Zephyr libmctp bridge (optional)
+# ----------------------------------------------------------------------------
+if(CONFIG_LIBSPDM_TRANSPORT_MCTP_LIBMCTP_BRIDGE)
+  zephyr_library_sources(${CMAKE_CURRENT_LIST_DIR}/src/spdm_mctp_io.c)
 endif()

@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
+# SPDX-License-Identifier: Apache-2.0
+sample:
+  description: libspdm SPDM requester over MCTP on I3C
+  name: libspdm requester I3C
+tests:
+  sample.lib.libspdm.requester_i3c.build:
+    build_only: true
+    tags: libspdm i3c mctp
+    platform_allow: npcx4m8f_evb
+    integration_platforms:
+      - npcx4m8f_evb

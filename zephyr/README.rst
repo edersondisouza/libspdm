@@ -18,8 +18,13 @@ The module is in early porting state. What works today:
   and responder, exercised through ``GET_VERSION`` /
   ``GET_CAPABILITIES`` / ``NEGOTIATE_ALGORITHMS`` on ``qemu_x86_64``
   (see ``samples/spdm_loopback``).
-* MCTP transport binding (``libspdm_transport_mctp_*``) — used by the
-  loopback sample on top of an in-process mock device.
+* MCTP transport binding (``libspdm_transport_mctp_*``) — bridged to
+  Zephyr's ``libmctp`` via
+  ``include/libspdm/zephyr/spdm_mctp_io.h``. Builds cleanly against
+  the MCTP-I3C controller and target bindings from ``zephyr/pmci/mctp``
+  on ``npcx4m8f_evb`` (see ``samples/spdm_requester_i3c`` and
+  ``samples/spdm_responder_i3c``); also drives the in-process
+  loopback sample on ``qemu_x86_64``.
 * Null crypto backend (compile/link-clean, useful for early bringup).
 * mbedTLS crypto backend wired up against Zephyr's ``mbedtls`` module
   *at the build-system level*. End-to-end exercise of the mbedTLS
@@ -32,8 +37,9 @@ Not yet supported:
 * PQC (ML-DSA, ML-KEM, SLH-DSA) — the module forces
   ``LIBSPDM_*_SUPPORT=0`` at compile time so the dependent code
   elides. Re-enabling requires a PQC-aware crypto backend.
-* Real on-the-wire transports — a Zephyr-libmctp bridge for the MCTP
-  transport binding and a two-node demo over MCTP-serial are planned.
+* Real on-the-wire transports — the libspdm <-> libmctp bridge is
+  in place and the I3C samples build for ``npcx4m8f_evb``; on-the-
+  wire validation between two physical boards has not happened yet.
 * CI on real (non-emulated) targets.
 
 Layout
@@ -42,16 +48,20 @@ Layout
 ::
 
   zephyr/
-  ├── module.yml               # tells Zephyr build system this is a module
-  ├── Kconfig                  # CONFIG_LIBSPDM_* options
-  ├── Kconfig.mbedtls          # mbedTLS feature requirements
-  ├── CMakeLists.txt           # builds the libspdm zephyr_library
+  ├── module.yml                    # tells Zephyr build system this is a module
+  ├── Kconfig                       # CONFIG_LIBSPDM_* options
+  ├── Kconfig.mbedtls               # mbedTLS feature requirements
+  ├── CMakeLists.txt                # builds the libspdm zephyr_library
   ├── include/libspdm/zephyr/
-  │   └── secret_blob.h        # registry API for embedded keys/certs
+  │   ├── secret_blob.h             # registry API for embedded keys/certs
+  │   └── spdm_mctp_io.h            # libspdm <-> libmctp bridge API
   ├── src/
-  │   └── secret_blob.c        # secret-blob registry + setcert stubs
+  │   ├── secret_blob.c             # secret-blob registry + setcert stubs
+  │   └── spdm_mctp_io.c            # libspdm <-> libmctp bridge implementation
   └── samples/
-      └── spdm_loopback/       # requester+responder in one app demo
+      ├── spdm_loopback/            # requester+responder in one app (qemu_x86_64)
+      ├── spdm_requester_i3c/       # SPDM requester over MCTP-I3C (npcx4m8f_evb)
+      └── spdm_responder_i3c/       # SPDM responder over MCTP-I3C (npcx4m8f_evb)
 
 The HAL backends consumed by libspdm itself
 (``libspdm_sleep`` / ``libspdm_debug_*`` / ``libspdm_*_pool`` /
@@ -116,21 +126,64 @@ excluded — it uses POSIX file I/O to update the on-disk cert chain,
 which is out of scope for the initial port. Applications that need a
 real ``SET_CERTIFICATE`` flow should override these in their own code.
 
-Sample
-------
+Samples
+-------
 
-``samples/spdm_loopback`` brings up a requester and a responder in two
-threads of a single Zephyr application, connects them through an
-in-process MCTP-framed loopback transport, and runs the first three
-steps of the SPDM handshake. Expected output:
+The module ships three samples (each with its own ``README.rst``):
 
-.. code-block:: console
+* ``samples/spdm_loopback`` — requester and responder threads in a
+  single Zephyr application, talking through an in-process mock
+  MCTP-framed channel. Runs on ``qemu_x86_64``. Prints
+  ``*** SPDM handshake (version/caps/algs) PASSED ***`` when the first
+  three handshake steps succeed.
+* ``samples/spdm_requester_i3c`` — SPDM requester (MCTP EID 20) on
+  top of the Zephyr MCTP-I3C controller binding from
+  ``zephyr/pmci/mctp``. Targets ``npcx4m8f_evb``.
+* ``samples/spdm_responder_i3c`` — SPDM responder (MCTP EID 11) on
+  top of the Zephyr MCTP-I3C target binding. Targets
+  ``npcx4m8f_evb``. Pair with the requester sample above on a second
+  board over a common I3C bus (SDA/SCL/GND) to run the handshake on
+  real hardware.
 
-   [requester] GET_VERSION ok
-   [requester] GET_CAPABILITIES + NEGOTIATE_ALGORITHMS ok
-   [requester] *** SPDM handshake (version/caps/algs) PASSED ***
+Build any of them with the same ``ZEPHYR_EXTRA_MODULES`` pointing
+at the libspdm checkout, e.g.::
 
-See ``samples/spdm_loopback/README.rst`` for build / run instructions.
+  ZEPHYR_EXTRA_MODULES=$(pwd)/libspdm \
+      west build -b qemu_x86_64 libspdm/zephyr/samples/spdm_loopback
+
+  ZEPHYR_EXTRA_MODULES=$(pwd)/libspdm \
+      west build -b npcx4m8f_evb libspdm/zephyr/samples/spdm_requester_i3c
+
+libspdm <-> libmctp bridge
+--------------------------
+
+``include/libspdm/zephyr/spdm_mctp_io.h`` declares a tiny adapter
+between libspdm's MCTP transport (DSP0275 framing) and Zephyr's
+``libmctp`` (DSP0236 message bus). The adapter is binding-agnostic:
+any libmctp binding (I3C controller, I3C target, I2C, serial...)
+works without changes to the bridge itself. Typical wiring:
+
+.. code-block:: c
+
+   #include <libmctp.h>
+   #include <zephyr/pmci/mctp/mctp_i3c_controller.h>
+   #include <libspdm/zephyr/spdm_mctp_io.h>
+
+   MCTP_I3C_CONTROLLER_DT_DEFINE(my_i3c, DT_NODELABEL(mctp_i3c));
+
+   static struct spdm_mctp_io io;
+
+   void app_main(void *spdm_ctx)
+   {
+       struct mctp *m = mctp_init();
+
+       mctp_register_bus(m, &my_i3c.binding, LOCAL_EID);
+       spdm_mctp_io_init(&io, m, LOCAL_EID, PEER_EID);
+       spdm_mctp_io_register(spdm_ctx, &io);
+       libspdm_register_transport_layer_func(spdm_ctx, ...,
+           libspdm_transport_mctp_encode_message,
+           libspdm_transport_mctp_decode_message);
+   }
 
 Known limitations
 -----------------
@@ -145,10 +198,16 @@ Known limitations
   most likely has to point ``CONFIG_MBEDTLS_USER_CONFIG_FILE`` at a
   ``mbedtls_user_config_libspdm.h`` that explicitly enables the
   primitives libspdm needs.
-* **Loopback only.** The MCTP transport binding has been exercised
-  only over an in-process mock channel. A bridge to Zephyr's
-  ``libmctp`` module is on the roadmap.
-* **No PQC.** As noted above, all PQC code paths are compiled out.
+* **Hardware run not yet performed.** The I3C samples build cleanly
+  but have not yet been flashed to two physical ``npcx4m8f_evb``
+  boards wired together over a common I3C bus.
+* **No PQC.** All PQC code paths (ML-DSA, ML-KEM, SLH-DSA) are
+  compiled out by forcing the relevant ``LIBSPDM_*_SUPPORT`` knobs
+  to 0 in the module CMakeLists; the optional GET / SET KEY_PAIR_INFO
+  capability is similarly excluded because the sample device-secret
+  library's ~1.5 MiB static state would not fit a typical Zephyr
+  target. Both restrictions can be lifted by re-defining the
+  corresponding compile knobs at the application level.
 
 Branch / commit history
 -----------------------

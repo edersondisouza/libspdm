@@ -52,6 +52,57 @@ config LIBSPDM_TRANSPORT_MCTP
 	bool "MCTP transport binding"
 	default y
 
+config LIBSPDM_TRANSPORT_MCTP_LIBMCTP_BRIDGE
+	bool "Bridge libspdm MCTP transport to Zephyr libmctp"
+	depends on LIBSPDM_TRANSPORT_MCTP
+	depends on MCTP
+	default y if MCTP
+	help
+	  Build the spdm_mctp_io bridge (zephyr/src/spdm_mctp_io.c).
+	  The bridge implements libspdm's device_send_message /
+	  device_receive_message / buffer hooks on top of a Zephyr
+	  libmctp instance. The application is still responsible for
+	  creating the libmctp context, registering a binding (I3C,
+	  I2C, serial, ...), and pairing the bridge with the libspdm
+	  context.
+
+config LIBSPDM_MCTP_BUFFER_SIZE
+	int "MCTP transport buffer size (bytes)"
+	depends on LIBSPDM_TRANSPORT_MCTP_LIBMCTP_BRIDGE
+	default 4224
+	help
+	  Size of the sender and receiver buffers owned by each
+	  spdm_mctp_io instance. Must fit the largest SPDM transport
+	  message (SPDM payload + the 1-byte MCTP message-type byte
+	  + transport alignment). 4224 is large enough for the
+	  default LIBSPDM_DATA_TRANSFER_SIZE of 4096 plus headroom.
+
+config LIBSPDM_MCTP_RX_QUEUE_DEPTH
+	int "MCTP RX queue depth"
+	depends on LIBSPDM_TRANSPORT_MCTP_LIBMCTP_BRIDGE
+	default 2
+	range 1 8
+	help
+	  Number of in-flight RX slots between the libmctp rx
+	  callback and device_receive_message(). One is enough for
+	  strict request/response traffic; raise it if the dispatcher
+	  may briefly fall behind the producer.
+
+config LIBSPDM_MCTP_MAX_BRIDGES
+	int "Maximum number of bridged libspdm contexts"
+	depends on LIBSPDM_TRANSPORT_MCTP_LIBMCTP_BRIDGE
+	default 2
+	range 1 8
+	help
+	  Upper bound on the number of (spdm_context, spdm_mctp_io)
+	  associations the bridge can track at once. 2 covers a single
+	  app that drives one requester and one responder; raise this
+	  if you bridge more than that.
+
+module = LIBSPDM_MCTP
+module-str = libspdm MCTP bridge
+source "subsys/logging/Kconfig.template.log_config"
+
 config LIBSPDM_TRANSPORT_PCI_DOE
 	bool "PCI DOE transport binding"
 

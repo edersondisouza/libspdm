@@ -1,0 +1,39 @@
+/*
+ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * I3C target-side overlay for the libspdm SPDM responder sample on
+ * the Nuvoton NPCX4M8F EVB. Mirrors the wiring used by the upstream
+ * samples/subsys/pmci/mctp/i3c_bus_endpoint overlay for the same
+ * board.
+ */
+
+&rctl {
+	status = "okay";
+};
+
+&i3c0 {
+	status = "okay";
+	i3c-scl-hz = <7500000>;
+	i3c-od-scl-hz = <1500000>;
+
+	bcr = <0x06>;
+	tgt-pid = <0x0000020a 0x00000011>;
+};
+
+&pcc {
+	clock-frequency = <DT_FREQ_M(90)>;
+	core-prescaler = <3>;
+	apb1-prescaler = <6>;
+	apb2-prescaler = <6>;
+	apb3-prescaler = <6>;
+	apb4-prescaler = <3>;
+};
+
+/ {
+	mctp_i3c: mctp_i3c {
+		compatible = "zephyr,mctp-i3c-target";
+		i3c = <&i3c0>;
+		endpoint-id = <11>;
+	};
+};
