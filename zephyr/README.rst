@@ -209,13 +209,21 @@ Known limitations
   ``mbedtls_time`` (mid-2025) that sits inside the validity window of
   the DMTF sample certificates. Real deployments must replace this
   with a meaningful time source.
-* **Hardware run still uses the null crypto backend.** The handshake
-  has been validated end-to-end on two ``npcx4m8f_evb`` boards through
-  ``GET_VERSION`` / ``GET_CAPABILITIES`` / ``NEGOTIATE_ALGORITHMS``.
-  The mbedTLS backend has only been exercised on ``qemu_x86_64`` so
-  far; flipping the I3C samples to ``CONFIG_LIBSPDM_CRYPTO_MBEDTLS=y``
-  on the 384 KiB-flash / 114 KiB-RAM ``npcx4m8f`` requires further
-  footprint work.
+* **No hardware RNG on npcx4m8f.** The Nuvoton ``npcx4`` SoC does not
+  expose a hardware DRBG to Zephyr. The I3C samples therefore enable
+  ``CONFIG_TEST_RANDOM_GENERATOR=y`` (which selects
+  ``TIMER_RANDOM_GENERATOR``), seeding the RNG from
+  ``k_cycle_get_32()``. This is **not** suitable for production —
+  real deployments must wire a real entropy source (hardware RNG,
+  secure-element-backed DRBG, …).
+* **Hardware on-wire validation predates the mbedTLS switch.** The
+  ``npcx4m8f_evb`` pair was last validated end-to-end through
+  ``NEGOTIATE_ALGORITHMS`` with the null backend (commit
+  ``737005ed``). After ``903d9578`` / this commit, the I3C samples
+  build with ``CONFIG_LIBSPDM_CRYPTO_MBEDTLS=y`` and the same
+  authenticated handshake (``GET_DIGESTS`` / ``GET_CERTIFICATE`` /
+  ``CHALLENGE_AUTH``) the loopback exercises on ``qemu_x86_64``,
+  but re-running this on hardware is pending.
 * **No PQC.** All PQC code paths (ML-DSA, ML-KEM, SLH-DSA) are
   compiled out by forcing the relevant ``LIBSPDM_*_SUPPORT`` knobs
   to 0 in the module CMakeLists; the optional GET / SET KEY_PAIR_INFO

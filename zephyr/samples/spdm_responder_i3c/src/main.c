@@ -10,6 +10,7 @@
  */
 
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <zephyr/kernel.h>
@@ -21,9 +22,14 @@
 #include "library/spdm_common_lib.h"
 #include "library/spdm_responder_lib.h"
 #include "library/spdm_transport_mctp_lib.h"
+#include "internal/libspdm_device_secret_lib.h"
+#include "hal/library/memlib.h"
 #include "industry_standard/spdm.h"
 
 #include "libspdm/zephyr/spdm_mctp_io.h"
+#include <libspdm/zephyr/secret_blob.h>
+
+#include "sample_ecp256.h"
 
 LOG_MODULE_REGISTER(spdm_responder_i3c, LOG_LEVEL_INF);
 
@@ -104,6 +110,42 @@ static int configure_spdm(void *spdm_ctx)
 	return 0;
 }
 
+#ifdef CONFIG_LIBSPDM_CRYPTO_MBEDTLS
+static int install_responder_cert_chain(void *spdm_ctx)
+{
+	libspdm_data_parameter_t param;
+	void *cert_chain = NULL;
+	size_t cert_chain_size = 0;
+	uint8_t u8;
+	bool res;
+
+	res = libspdm_read_responder_public_certificate_chain(
+		SPDM_ALGORITHMS_BASE_HASH_ALGO_TPM_ALG_SHA_256,
+		SPDM_ALGORITHMS_BASE_ASYM_ALGO_TPM_ALG_ECDSA_ECC_NIST_P256,
+		&cert_chain, &cert_chain_size, NULL, NULL);
+	if (!res || cert_chain == NULL) {
+		LOG_ERR("failed to load responder cert chain");
+		return -1;
+	}
+
+	memset(&param, 0, sizeof(param));
+	param.location = LIBSPDM_DATA_LOCATION_LOCAL;
+	param.additional_data[0] = 0; /* slot 0 */
+	(void)libspdm_set_data(spdm_ctx, LIBSPDM_DATA_LOCAL_PUBLIC_CERT_CHAIN,
+			       &param, cert_chain, cert_chain_size);
+	/* libspdm_set_data stores the pointer for LOCAL_PUBLIC_CERT_CHAIN
+	 * (no internal copy), so cert_chain must outlive spdm_ctx. We
+	 * intentionally leak the allocation -- it lives for the lifetime
+	 * of the responder process.
+	 */
+
+	u8 = 1U << 0; /* only slot 0 populated */
+	(void)libspdm_set_data(spdm_ctx, LIBSPDM_DATA_LOCAL_SUPPORTED_SLOT_MASK,
+			       &param, &u8, sizeof(u8));
+	return 0;
+}
+#endif
+
 int main(void)
 {
 	struct mctp *mctp_ctx;
@@ -152,6 +194,16 @@ int main(void)
 		LOG_ERR("configure_spdm failed");
 		return -1;
 	}
+
+#ifdef CONFIG_LIBSPDM_CRYPTO_MBEDTLS
+	if (libspdm_zephyr_secret_blob_register(sample_ecp256_blobs) != 0) {
+		LOG_ERR("secret blob registration failed");
+		return -1;
+	}
+	if (install_responder_cert_chain(spdm_ctx) != 0) {
+		return -1;
+	}
+#endif
 
 	LOG_INF("entering responder dispatch loop");
 	while (true) {

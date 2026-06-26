@@ -11,6 +11,6 @@ target_sources(app PRIVATE
   src/mock_transport.c
   src/requester.c
   src/responder.c
-  src/secrets/sample_ecp256.c
+  ${CMAKE_CURRENT_LIST_DIR}/../common/sample_ecp256.c
 )
-target_include_directories(app PRIVATE src/secrets)
+target_include_directories(app PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../common)

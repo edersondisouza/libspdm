@@ -18,6 +18,7 @@
  */
 
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <zephyr/kernel.h>
@@ -29,9 +30,14 @@
 #include "library/spdm_common_lib.h"
 #include "library/spdm_requester_lib.h"
 #include "library/spdm_transport_mctp_lib.h"
+#include "internal/libspdm_device_secret_lib.h"
+#include "hal/library/memlib.h"
 #include "industry_standard/spdm.h"
 
 #include "libspdm/zephyr/spdm_mctp_io.h"
+#include <libspdm/zephyr/secret_blob.h>
+
+#include "sample_ecp256.h"
 
 LOG_MODULE_REGISTER(spdm_requester_i3c, LOG_LEVEL_INF);
 
@@ -120,6 +126,50 @@ static int configure_spdm(void *spdm_ctx)
 	return 0;
 }
 
+#ifdef CONFIG_LIBSPDM_CRYPTO_MBEDTLS
+static int install_peer_root_cert(void *spdm_ctx)
+{
+	libspdm_data_parameter_t param;
+	void *cert_chain = NULL;
+	size_t cert_chain_size = 0;
+	void *hash = NULL;
+	size_t hash_size = 0;
+	const uint8_t *root_cert;
+	size_t root_cert_size;
+	bool res;
+
+	res = libspdm_read_responder_public_certificate_chain(
+		SPDM_ALGORITHMS_BASE_HASH_ALGO_TPM_ALG_SHA_256,
+		SPDM_ALGORITHMS_BASE_ASYM_ALGO_TPM_ALG_ECDSA_ECC_NIST_P256,
+		&cert_chain, &cert_chain_size, &hash, &hash_size);
+	if (!res || cert_chain == NULL) {
+		LOG_ERR("cannot load responder cert chain to extract root");
+		return -1;
+	}
+
+	res = libspdm_x509_get_cert_from_cert_chain(
+		(uint8_t *)cert_chain + sizeof(spdm_cert_chain_t) + hash_size,
+		cert_chain_size - sizeof(spdm_cert_chain_t) - hash_size,
+		0, &root_cert, &root_cert_size);
+	if (!res) {
+		LOG_ERR("cert-chain root extract failed");
+		free(cert_chain);
+		return -1;
+	}
+
+	memset(&param, 0, sizeof(param));
+	param.location = LIBSPDM_DATA_LOCATION_LOCAL;
+	(void)libspdm_set_data(spdm_ctx, LIBSPDM_DATA_PEER_PUBLIC_ROOT_CERT,
+			       &param, (void *)root_cert, root_cert_size);
+	/* libspdm_set_data stores the pointer for PEER_PUBLIC_ROOT_CERT
+	 * (no internal copy), and root_cert points inside cert_chain.
+	 * Both must outlive spdm_ctx, so we intentionally leak the
+	 * allocation -- it lives for the lifetime of the requester.
+	 */
+	return 0;
+}
+#endif
+
 int main(void)
 {
 	struct mctp *mctp_ctx;
@@ -168,6 +218,16 @@ int main(void)
 		return -1;
 	}
 
+#ifdef CONFIG_LIBSPDM_CRYPTO_MBEDTLS
+	if (libspdm_zephyr_secret_blob_register(sample_ecp256_blobs) != 0) {
+		LOG_ERR("secret blob registration failed");
+		return -1;
+	}
+	if (install_peer_root_cert(spdm_ctx) != 0) {
+		return -1;
+	}
+#endif
+
 	LOG_INF("issuing GET_VERSION");
 	status = libspdm_init_connection(spdm_ctx, true);
 	if (status != LIBSPDM_STATUS_SUCCESS) {
@@ -184,7 +244,49 @@ int main(void)
 	}
 	LOG_INF("GET_CAPABILITIES + NEGOTIATE_ALGORITHMS ok");
 
+#ifdef CONFIG_LIBSPDM_CRYPTO_MBEDTLS
+	{
+		uint8_t slot_mask = 0;
+		uint8_t total_digest[LIBSPDM_MAX_HASH_SIZE * SPDM_MAX_SLOT_COUNT];
+
+		status = libspdm_get_digest(spdm_ctx, NULL, &slot_mask, total_digest);
+		if (status != LIBSPDM_STATUS_SUCCESS) {
+			LOG_ERR("GET_DIGESTS failed: 0x%x", status);
+			return -1;
+		}
+		LOG_INF("GET_DIGESTS ok, slot_mask=0x%02x", slot_mask);
+	}
+
+	{
+		static uint8_t cert_buf[0x800];
+		size_t cert_chain_size = sizeof(cert_buf);
+
+		status = libspdm_get_certificate(spdm_ctx, NULL, 0,
+						 &cert_chain_size, cert_buf);
+		if (status != LIBSPDM_STATUS_SUCCESS) {
+			LOG_ERR("GET_CERTIFICATE failed: 0x%x", status);
+			return -1;
+		}
+		LOG_INF("GET_CERTIFICATE ok, chain_size=%zu", cert_chain_size);
+	}
+
+	{
+		uint8_t slot_mask = 0;
+
+		status = libspdm_challenge(spdm_ctx, NULL, 0,
+				SPDM_CHALLENGE_REQUEST_NO_MEASUREMENT_SUMMARY_HASH,
+				NULL, &slot_mask);
+		if (status != LIBSPDM_STATUS_SUCCESS) {
+			LOG_ERR("CHALLENGE_AUTH failed: 0x%x", status);
+			return -1;
+		}
+		LOG_INF("CHALLENGE_AUTH ok");
+	}
+
+	LOG_INF("*** SPDM authenticated handshake PASSED ***");
+#else
 	LOG_INF("*** SPDM handshake (version/caps/algs) PASSED ***");
+#endif
 
 	return 0;
 }

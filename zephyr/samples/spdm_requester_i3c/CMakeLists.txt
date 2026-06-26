@@ -7,4 +7,6 @@ project(spdm_requester_i3c)
 
 target_sources(app PRIVATE
   src/main.c
+  ${CMAKE_CURRENT_LIST_DIR}/../common/sample_ecp256.c
 )
+target_include_directories(app PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../common)
