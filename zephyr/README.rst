@@ -38,8 +38,10 @@ Not yet supported:
   ``LIBSPDM_*_SUPPORT=0`` at compile time so the dependent code
   elides. Re-enabling requires a PQC-aware crypto backend.
 * Real on-the-wire transports — the libspdm <-> libmctp bridge is
-  in place and the I3C samples build for ``npcx4m8f_evb``; on-the-
-  wire validation between two physical boards has not happened yet.
+  in place and the I3C samples have been validated on two physical
+  ``npcx4m8f_evb`` boards wired together over a common I3C bus
+  (handshake reaches ``NEGOTIATE_ALGORITHMS`` with the null crypto
+  backend).
 * CI on real (non-emulated) targets.
 
 Layout
@@ -198,9 +200,13 @@ Known limitations
   most likely has to point ``CONFIG_MBEDTLS_USER_CONFIG_FILE`` at a
   ``mbedtls_user_config_libspdm.h`` that explicitly enables the
   primitives libspdm needs.
-* **Hardware run not yet performed.** The I3C samples build cleanly
-  but have not yet been flashed to two physical ``npcx4m8f_evb``
-  boards wired together over a common I3C bus.
+* **Hardware run goes only as far as the null crypto backend
+  allows.** The handshake has been validated end-to-end on two
+  ``npcx4m8f_evb`` boards through ``GET_VERSION`` /
+  ``GET_CAPABILITIES`` / ``NEGOTIATE_ALGORITHMS``. Reaching
+  ``CHALLENGE_AUTH`` and ``GET_MEASUREMENTS`` requires the mbedTLS
+  user-config above plus an embedded certificate chain registered
+  via the device-secret library.
 * **No PQC.** All PQC code paths (ML-DSA, ML-KEM, SLH-DSA) are
   compiled out by forcing the relevant ``LIBSPDM_*_SUPPORT`` knobs
   to 0 in the module CMakeLists; the optional GET / SET KEY_PAIR_INFO
