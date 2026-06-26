@@ -66,6 +66,43 @@ set(LIBSPDM_DISABLE_PQC_DEFS
 # 1024 bytes is comfortably above any traditional asymmetric
 # SubjectPublicKeyInfo we'd carry (RSA-4096 SPKI is ~550 bytes).
 list(APPEND LIBSPDM_DISABLE_PQC_DEFS SPDM_MAX_PUBLIC_KEY_INFO_LEN=1024)
+
+# Embedded-friendly libspdm sizing knobs. All are #ifndef-guarded in
+# spdm_lib_config.h (or, for LIBSPDM_MAX_KEY_PAIR_COUNT, in the sample
+# device-secret library's key_pair.c). Applications that need larger
+# values can override them at the app level.
+list(APPEND LIBSPDM_DISABLE_PQC_DEFS
+  # Single SPDM session is enough for the demo and saves the bulk of
+  # the per-session transcript and AEAD state (~tens of KiB).
+  LIBSPDM_MAX_SESSION_COUNT=1
+
+  # The sample device-secret library populates m_key_pair_info[] with
+  # one entry per enabled traditional asym algorithm (and doubles them
+  # for its multi-key example). We only enable ECDSA-P256 below, so
+  # 1 primary + 1 secondary == 2 entries fits and avoids the
+  # -Warray-bounds warnings that MAX_KEY_PAIR_COUNT=1 would trigger.
+  LIBSPDM_MAX_KEY_PAIR_COUNT=2
+
+  # 2 KiB is enough for an ECDSA-P256 leaf+CA chain; the libspdm
+  # default of 4 KiB is sized for RSA-4096.
+  LIBSPDM_MAX_CERT_CHAIN_SIZE=0x800
+
+  # Disable traditional asym algorithms we don't use. Keeping only
+  # ECDSA-P256 matches the planned mbedTLS handshake (smallest
+  # crypto/cert footprint of the IETF suites) and keeps
+  # m_key_pair_info[] in sync with MAX_KEY_PAIR_COUNT=2.
+  LIBSPDM_RSA_SSA_2048_SUPPORT=0
+  LIBSPDM_RSA_SSA_3072_SUPPORT=0
+  LIBSPDM_RSA_SSA_4096_SUPPORT=0
+  LIBSPDM_RSA_PSS_2048_SUPPORT=0
+  LIBSPDM_RSA_PSS_3072_SUPPORT=0
+  LIBSPDM_RSA_PSS_4096_SUPPORT=0
+  LIBSPDM_ECDSA_P384_SUPPORT=0
+  LIBSPDM_ECDSA_P521_SUPPORT=0
+  LIBSPDM_SM2_DSA_P256_SUPPORT=0
+  LIBSPDM_EDDSA_ED25519_SUPPORT=0
+  LIBSPDM_EDDSA_ED448_SUPPORT=0
+)
 zephyr_library_compile_definitions(${LIBSPDM_DISABLE_PQC_DEFS})
 zephyr_compile_definitions(${LIBSPDM_DISABLE_PQC_DEFS})
 
