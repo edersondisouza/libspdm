@@ -68,6 +68,18 @@ static int configure_spdm(void *spdm_ctx)
 		return -1;
 	}
 
+	/* CT_EXPONENT advertises the worst-case crypto response time as
+	 * 2^CT microseconds. The responder runs ECDH keygen + ECDSA
+	 * sign + transcript hashing entirely in software on the
+	 * Cortex-M4F (no PSA crypto accelerator on npcx4), so
+	 * KEY_EXCHANGE can take well over a second; CT=22 (~4.2 s)
+	 * gives the requester ample headroom over MCTP-on-I3C without
+	 * being absurdly large.
+	 */
+	u8 = 22U;
+	(void)libspdm_set_data(spdm_ctx, LIBSPDM_DATA_CAPABILITY_CT_EXPONENT,
+			       &param, &u8, sizeof(u8));
+
 	u32 = SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_CERT_CAP |
 	      SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_CHAL_CAP;
 	if (libspdm_set_data(spdm_ctx, LIBSPDM_DATA_CAPABILITY_FLAGS, &param,

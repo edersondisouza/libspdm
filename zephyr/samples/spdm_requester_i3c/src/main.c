@@ -91,6 +91,27 @@ static int configure_spdm(void *spdm_ctx)
 		return -1;
 	}
 
+	/* Local capability hints used to derive request timeouts:
+	 *   timeout = RTT + 2^CT_EXPONENT (microseconds, crypto path)
+	 *           = RTT + ST1            (non-crypto path, default 100 ms)
+	 * Both RTT and CT_EXPONENT default to 0, which yields a
+	 * sub-microsecond wait that fires immediately on the I3C link
+	 * once we reach a crypto-bearing exchange (e.g. GET_DIGESTS).
+	 * Set conservative values:
+	 *   RTT     = 100 ms (covers MCTP-over-I3C round trip plus IBI),
+	 *   CT_EXP  = 22      (~4.2 s -- KEY_EXCHANGE on the responder
+	 *                      runs ECDH keygen + ECDSA sign + transcript
+	 *                      hashing entirely in software on Cortex-M4F
+	 *                      and was observed to take ~1.35 s on a real
+	 *                      npcx4m8f_evb pair).
+	 */
+	u8 = 22U;
+	(void)libspdm_set_data(spdm_ctx, LIBSPDM_DATA_CAPABILITY_CT_EXPONENT,
+			       &param, &u8, sizeof(u8));
+	u32 = 100000U;
+	(void)libspdm_set_data(spdm_ctx, LIBSPDM_DATA_CAPABILITY_RTT_US,
+			       &param, &u32, sizeof(u32));
+
 	u8 = SPDM_MEASUREMENT_SPECIFICATION_DMTF;
 	(void)libspdm_set_data(spdm_ctx, LIBSPDM_DATA_MEASUREMENT_SPEC,
 			       &param, &u8, sizeof(u8));
