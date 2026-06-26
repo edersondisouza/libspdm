@@ -38,6 +38,7 @@
 #include <libspdm/zephyr/secret_blob.h>
 
 #include "sample_ecp256.h"
+#include "sample_app_message.h"
 
 LOG_MODULE_REGISTER(spdm_requester_i3c, LOG_LEVEL_INF);
 
@@ -85,7 +86,10 @@ static int configure_spdm(void *spdm_ctx)
 	}
 
 	u32 = SPDM_GET_CAPABILITIES_REQUEST_FLAGS_CERT_CAP |
-	      SPDM_GET_CAPABILITIES_REQUEST_FLAGS_CHAL_CAP;
+	      SPDM_GET_CAPABILITIES_REQUEST_FLAGS_CHAL_CAP |
+	      SPDM_GET_CAPABILITIES_REQUEST_FLAGS_KEY_EX_CAP |
+	      SPDM_GET_CAPABILITIES_REQUEST_FLAGS_ENCRYPT_CAP |
+	      SPDM_GET_CAPABILITIES_REQUEST_FLAGS_MAC_CAP;
 	if (libspdm_set_data(spdm_ctx, LIBSPDM_DATA_CAPABILITY_FLAGS, &param,
 			     &u32, sizeof(u32)) != LIBSPDM_STATUS_SUCCESS) {
 		return -1;
@@ -305,6 +309,22 @@ int main(void)
 	}
 
 	LOG_INF("*** SPDM authenticated handshake PASSED ***");
+
+	{
+		int rc;
+
+		LOG_INF("starting secure session + ping/pong");
+		rc = sample_app_message_exchange(spdm_ctx);
+		if (rc != 0) {
+			/* Negative low 16 bits of the libspdm status, or
+			 * -1 for "response payload mismatch". */
+			LOG_ERR("encrypted ping/pong failed: rc=%d "
+				"(libspdm status ~0x8%04x)",
+				rc, (unsigned int)(-rc) & 0xffffU);
+			return -1;
+		}
+		LOG_INF("*** SPDM session ping/pong PASSED ***");
+	}
 #else
 	LOG_INF("*** SPDM handshake (version/caps/algs) PASSED ***");
 #endif

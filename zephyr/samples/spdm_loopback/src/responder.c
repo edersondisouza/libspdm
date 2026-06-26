@@ -25,6 +25,7 @@
 #include "industry_standard/spdm.h"
 
 #include "spdm_loopback.h"
+#include "sample_app_message.h"
 
 void *responder_spdm_context;
 void *responder_scratch;
@@ -82,13 +83,17 @@ static void configure_responder(void *ctx)
     libspdm_set_data(ctx, LIBSPDM_DATA_CAPABILITY_CT_EXPONENT, &parameter,
                      &u8, sizeof(u8));
 
-    /* Minimum responder cap flags: CERT + CHAL. Even with the null
-     * crypto backend the capability negotiation handshake itself runs
-     * purely on byte exchange. MEAS_CAP_SIG requires a configured
-     * measurement_hash_algo, so we leave it off for the
-     * VERSION/CAPS/ALGS milestone. */
+    /* Responder capabilities for the authenticated handshake plus an
+     * encrypted SPDM session: CERT (GET_CERTIFICATE), CHAL
+     * (CHALLENGE_AUTH), KEY_EX (KEY_EXCHANGE/FINISH session
+     * establishment) and ENCRYPT + MAC (AEAD-protected secured
+     * messages). HBEAT is optional but cheap to advertise. */
     u32 = SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_CERT_CAP |
-          SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_CHAL_CAP;
+          SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_CHAL_CAP |
+          SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_KEY_EX_CAP |
+          SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_ENCRYPT_CAP |
+          SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_MAC_CAP |
+          SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_HBEAT_CAP;
     libspdm_set_data(ctx, LIBSPDM_DATA_CAPABILITY_FLAGS, &parameter,
                      &u32, sizeof(u32));
 
@@ -154,6 +159,12 @@ void responder_thread_main(void *a, void *b, void *c)
     }
     libspdm_set_scratch_buffer(responder_spdm_context,
                                responder_scratch, scratch_size);
+
+    /* Hook in the application-message dispatcher: libspdm invokes
+     * this whenever a secured message lands with is_app_message
+     * set. The handler answers "ping" with "pong". */
+    libspdm_register_get_response_func(responder_spdm_context,
+                                       sample_app_message_handler);
 
     printk("[responder] ready, scratch=%zu bytes\n", scratch_size);
 

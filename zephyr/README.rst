@@ -17,32 +17,30 @@ The module is in early porting state. What works today:
 * SPDM 1.0 / 1.1 / 1.2 message framing and state machines, requester
   and responder, exercised end-to-end through ``GET_VERSION`` /
   ``GET_CAPABILITIES`` / ``NEGOTIATE_ALGORITHMS`` / ``GET_DIGESTS`` /
-  ``GET_CERTIFICATE`` / ``CHALLENGE_AUTH`` on ``qemu_x86_64`` (see
+  ``GET_CERTIFICATE`` / ``CHALLENGE_AUTH`` plus ``KEY_EXCHANGE`` /
+  ``FINISH`` and AEAD-protected application messages (see
   ``samples/spdm_loopback``).
 * MCTP transport binding (``libspdm_transport_mctp_*``) — bridged to
   Zephyr's ``libmctp`` via
-  ``include/libspdm/zephyr/spdm_mctp_io.h``. Builds cleanly against
-  the MCTP-I3C controller and target bindings from ``zephyr/pmci/mctp``
-  on ``npcx4m8f_evb`` (see ``samples/spdm_requester_i3c`` and
-  ``samples/spdm_responder_i3c``); also drives the in-process
-  loopback sample on ``qemu_x86_64``.
+  ``include/libspdm/zephyr/spdm_mctp_io.h``. The MCTP-I3C samples have
+  been validated end-to-end on a pair of physical ``npcx4m8f_evb``
+  boards wired together over a common I3C bus
+  (``samples/spdm_requester_i3c`` and ``samples/spdm_responder_i3c``).
 * Null crypto backend (compile/link-clean, useful for early bringup).
 * mbedTLS crypto backend, built directly from the mbedTLS 3.6.5 LTS
   source tree vendored under ``os_stub/mbedtlslib/`` (Zephyr's own
   mbedTLS module is not used — see *Known limitations* for why).
   End-to-end ECDSA-P256 ``CHALLENGE_AUTH`` with X.509 chain
-  verification passes on ``qemu_x86_64``.
+  verification plus an SPDM secured session (``KEY_EXCHANGE`` /
+  ``FINISH`` with ECDHE-secp256r1 and AES-256-GCM) and a round-trip
+  encrypted application message ("ping" / "pong") pass on both
+  ``qemu_x86_64`` (loopback) and the npcx4 I3C pair.
 
 Not yet supported:
 
 * PQC (ML-DSA, ML-KEM, SLH-DSA) — the module forces
   ``LIBSPDM_*_SUPPORT=0`` at compile time so the dependent code
   elides. Re-enabling requires a PQC-aware crypto backend.
-* Real on-the-wire transports — the libspdm <-> libmctp bridge is
-  in place and the I3C samples have been validated on two physical
-  ``npcx4m8f_evb`` boards wired together over a common I3C bus
-  (handshake reaches ``NEGOTIATE_ALGORITHMS`` with the null crypto
-  backend).
 * CI on real (non-emulated) targets.
 
 Layout
@@ -216,14 +214,25 @@ Known limitations
   ``k_cycle_get_32()``. This is **not** suitable for production —
   real deployments must wire a real entropy source (hardware RNG,
   secure-element-backed DRBG, …).
-* **Hardware on-wire validation predates the mbedTLS switch.** The
-  ``npcx4m8f_evb`` pair was last validated end-to-end through
-  ``NEGOTIATE_ALGORITHMS`` with the null backend (commit
-  ``737005ed``). After ``903d9578`` / this commit, the I3C samples
-  build with ``CONFIG_LIBSPDM_CRYPTO_MBEDTLS=y`` and the same
-  authenticated handshake (``GET_DIGESTS`` / ``GET_CERTIFICATE`` /
-  ``CHALLENGE_AUTH``) the loopback exercises on ``qemu_x86_64``,
-  but re-running this on hardware is pending.
+* **Hardware on-wire validation status.** The ``npcx4m8f_evb`` pair
+  has been validated end-to-end with the mbedTLS backend running the
+  full authenticated handshake (``GET_DIGESTS`` /
+  ``GET_CERTIFICATE`` / ``CHALLENGE_AUTH``) followed by an SPDM
+  secured session (``KEY_EXCHANGE`` / ``FINISH``) and a round-trip
+  AEAD-protected app message ("ping" / "pong"). Wall-clock cost on
+  bare Cortex-M4 software crypto is dominated by the three ECDSA
+  verifies during ``GET_CERTIFICATE`` (~2.6 s) and the
+  sign+verify+HMAC sequence during ``CHALLENGE_AUTH`` (~1.7 s);
+  ``KEY_EXCHANGE`` / ``FINISH`` adds roughly another second.
+  Approximate flash / RAM footprint on the 384 KiB / 114 KiB
+  npcx4m8f after enabling secured sessions:
+
+  =====================================  ============  ============
+  Sample                                 Flash         RAM
+  =====================================  ============  ============
+  ``spdm_responder_i3c`` (mbedTLS)       ~67 %         ~86 %
+  ``spdm_requester_i3c`` (mbedTLS)       ~62 %         ~84 %
+  =====================================  ============  ============
 * **No PQC.** All PQC code paths (ML-DSA, ML-KEM, SLH-DSA) are
   compiled out by forcing the relevant ``LIBSPDM_*_SUPPORT`` knobs
   to 0 in the module CMakeLists; the optional GET / SET KEY_PAIR_INFO

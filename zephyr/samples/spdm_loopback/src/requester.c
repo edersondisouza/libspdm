@@ -30,6 +30,7 @@
 #include "industry_standard/spdm.h"
 
 #include "spdm_loopback.h"
+#include "sample_app_message.h"
 
 void *requester_spdm_context;
 void *requester_scratch;
@@ -97,8 +98,14 @@ static void configure_requester(void *ctx)
     libspdm_set_data(ctx, LIBSPDM_DATA_CAPABILITY_CT_EXPONENT, &parameter,
                      &u8, sizeof(u8));
 
+    /* Requester capabilities: pair the responder side. KEY_EX selects
+     * KEY_EXCHANGE/FINISH session establishment; ENCRYPT + MAC enable
+     * AEAD record protection for app messages. */
     u32 = SPDM_GET_CAPABILITIES_REQUEST_FLAGS_CERT_CAP |
-          SPDM_GET_CAPABILITIES_REQUEST_FLAGS_CHAL_CAP;
+          SPDM_GET_CAPABILITIES_REQUEST_FLAGS_CHAL_CAP |
+          SPDM_GET_CAPABILITIES_REQUEST_FLAGS_KEY_EX_CAP |
+          SPDM_GET_CAPABILITIES_REQUEST_FLAGS_ENCRYPT_CAP |
+          SPDM_GET_CAPABILITIES_REQUEST_FLAGS_MAC_CAP;
     libspdm_set_data(ctx, LIBSPDM_DATA_CAPABILITY_FLAGS, &parameter,
                      &u32, sizeof(u32));
 
@@ -233,4 +240,18 @@ void requester_thread_main(void *a, void *b, void *c)
     }
 
     printk("[requester] *** SPDM authenticated handshake PASSED ***\n");
+
+    /* KEY_EXCHANGE/FINISH a secure session, then send a single AEAD-
+     * protected app message ("ping") and expect "pong" back. */
+    {
+        int rc = sample_app_message_exchange(requester_spdm_context);
+
+        if (rc != 0) {
+            printk("[requester] encrypted ping/pong failed: %d\n", rc);
+            return;
+        }
+        printk("[requester] encrypted ping/pong ok\n");
+    }
+
+    printk("[requester] *** SPDM session ping/pong PASSED ***\n");
 }

@@ -30,6 +30,7 @@
 #include <libspdm/zephyr/secret_blob.h>
 
 #include "sample_ecp256.h"
+#include "sample_app_message.h"
 
 LOG_MODULE_REGISTER(spdm_responder_i3c, LOG_LEVEL_INF);
 
@@ -81,7 +82,11 @@ static int configure_spdm(void *spdm_ctx)
 			       &param, &u8, sizeof(u8));
 
 	u32 = SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_CERT_CAP |
-	      SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_CHAL_CAP;
+	      SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_CHAL_CAP |
+	      SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_KEY_EX_CAP |
+	      SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_ENCRYPT_CAP |
+	      SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_MAC_CAP |
+	      SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_HBEAT_CAP;
 	if (libspdm_set_data(spdm_ctx, LIBSPDM_DATA_CAPABILITY_FLAGS, &param,
 			     &u32, sizeof(u32)) != LIBSPDM_STATUS_SUCCESS) {
 		return -1;
@@ -215,6 +220,12 @@ int main(void)
 	if (install_responder_cert_chain(spdm_ctx) != 0) {
 		return -1;
 	}
+
+	/* Answer secured "ping" app messages with "pong". libspdm
+	 * routes any secured message it can't natively handle to this
+	 * callback with is_app_message=true. */
+	libspdm_register_get_response_func(spdm_ctx,
+					   sample_app_message_handler);
 #endif
 
 	LOG_INF("entering responder dispatch loop");

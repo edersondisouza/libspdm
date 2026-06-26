@@ -12,5 +12,6 @@ target_sources(app PRIVATE
   src/requester.c
   src/responder.c
   ${CMAKE_CURRENT_LIST_DIR}/../common/sample_ecp256.c
+  ${CMAKE_CURRENT_LIST_DIR}/../common/sample_app_message.c
 )
 target_include_directories(app PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../common)

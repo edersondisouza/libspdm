@@ -12,27 +12,27 @@ Zephyr module by running an SPDM requester and an SPDM responder side
 by side, in two threads of the same Zephyr application, talking through
 a pair of k_sem-synchronised buffers (a "mock transport").
 
-It performs the first three steps of the SPDM 1.2 handshake:
+It performs the full SPDM 1.2 authenticated handshake plus a secured
+session ping/pong:
 
-* ``GET_VERSION``
-* ``GET_CAPABILITIES``
-* ``NEGOTIATE_ALGORITHMS``
+* ``GET_VERSION`` / ``GET_CAPABILITIES`` / ``NEGOTIATE_ALGORITHMS``
+* ``GET_DIGESTS`` / ``GET_CERTIFICATE`` / ``CHALLENGE_AUTH``
+  (ECDSA-P256 device identity, X.509 chain verified against an
+  embedded root from the DMTF sample certs)
+* ``KEY_EXCHANGE`` / ``FINISH`` (ECDHE-secp256r1 + AES-256-GCM
+  secured session)
+* a single AEAD-protected application message round trip
+  ("ping" → "pong") over that session, before
+  ``END_SESSION`` tears it down
 
-These three steps fully exercise:
+This fully exercises:
 
 * the libspdm send / receive / buffer-management hooks,
 * the MCTP transport framing (``libspdm_transport_mctp_encode_message``
-  and ``..._decode_message``), and
-* both libspdm state machines on the requester and responder side,
-
-without requiring any cryptographic primitives, so the demo works with
-the *null* crypto backend (``CONFIG_LIBSPDM_CRYPTO_NULL=y``).  Extending
-the demo to ``GET_DIGESTS / GET_CERTIFICATE / CHALLENGE_AUTH /
-GET_MEASUREMENTS`` is a matter of (a) switching to
-``CONFIG_LIBSPDM_CRYPTO_MBEDTLS=y`` and (b) registering an embedded
-certificate chain and private key via
-``libspdm_zephyr_secret_blob_register()`` (see
-``include/libspdm/zephyr/secret_blob.h``).
+  and ``..._decode_message``),
+* both libspdm state machines on the requester and responder side, and
+* the vendored mbedTLS 3.6.5 crypto backend (X.509 parse, ECDSA verify,
+  ECDHE, AES-GCM, HKDF).
 
 Building and running
 ********************
@@ -61,7 +61,12 @@ Expected output
    [requester] ready, scratch=26496 bytes
    [requester] GET_VERSION ok
    [requester] GET_CAPABILITIES + NEGOTIATE_ALGORITHMS ok
-   [requester] *** SPDM handshake (version/caps/algs) PASSED ***
+   [requester] GET_DIGESTS ok, slot_mask=0x01
+   [requester] GET_CERTIFICATE ok, chain_size=1390
+   [requester] CHALLENGE_AUTH ok
+   [requester] *** SPDM authenticated handshake PASSED ***
+   [requester] encrypted ping/pong ok
+   [requester] *** SPDM session ping/pong PASSED ***
    [responder] receive timeout, exiting
 
 Footprint

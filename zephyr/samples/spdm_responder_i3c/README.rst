@@ -11,12 +11,17 @@ Overview
 This is the responder counterpart to the ``spdm_requester_i3c``
 sample. It registers a single libspdm responder context, binds it to
 a Zephyr libmctp instance bound to the I3C target binding from
-``zephyr/pmci/mctp/mctp_i3c_target``, and loops on
-``libspdm_responder_dispatch_message`` waiting for SPDM requests from
-the peer.
+``zephyr/pmci/mctp/mctp_i3c_target``, installs the DMTF sample
+ECDSA-P256 certificate chain into slot 0, registers an
+application-message dispatcher that answers a secured "ping" with
+"pong", and loops on ``libspdm_responder_dispatch_message`` waiting
+for SPDM requests from the peer.
 
-See ``samples/spdm_requester_i3c/README.rst`` for wiring and build
-flow; both samples target ``npcx4m8f_evb`` with matching I3C overlays.
+See ``samples/spdm_requester_i3c/README.rst`` for the on-wire flow
+the peer drives (full authenticated handshake plus ``KEY_EXCHANGE`` /
+``FINISH`` and one AEAD app-message round trip), wiring details, and
+build instructions; both samples target ``npcx4m8f_evb`` with
+matching I3C overlays.
 
 Building and Running
 ********************

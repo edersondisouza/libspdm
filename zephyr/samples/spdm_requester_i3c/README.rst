@@ -10,17 +10,30 @@ Overview
 
 This sample exercises the libspdm Zephyr module's MCTP transport
 binding against Zephyr's ``libmctp`` and the I3C controller binding
-from ``zephyr/pmci/mctp/mctp_i3c_controller``. It drives the first
-three steps of the SPDM 1.2 handshake (``GET_VERSION``,
-``GET_CAPABILITIES``, ``NEGOTIATE_ALGORITHMS``) against a peer running
-the ``spdm_responder_i3c`` sample.
+from ``zephyr/pmci/mctp/mctp_i3c_controller``. It drives the full
+authenticated SPDM 1.2 handshake plus a secured-session ping/pong
+against a peer running the ``spdm_responder_i3c`` sample:
 
-The crypto backend used is ``CONFIG_LIBSPDM_CRYPTO_NULL``, which is
-enough for the algorithm negotiation steps. Switching to
-``CONFIG_LIBSPDM_CRYPTO_MBEDTLS`` and registering an embedded
-certificate chain via ``libspdm_zephyr_secret_blob_register()`` is
-needed for ``GET_DIGESTS``, ``GET_CERTIFICATE``, ``CHALLENGE_AUTH``
-and ``GET_MEASUREMENTS``.
+* ``GET_VERSION`` / ``GET_CAPABILITIES`` / ``NEGOTIATE_ALGORITHMS``
+* ``GET_DIGESTS`` / ``GET_CERTIFICATE`` / ``CHALLENGE_AUTH``
+  (ECDSA-P256 / SHA-256, X.509 chain verified against an embedded
+  DMTF sample root)
+* ``KEY_EXCHANGE`` / ``FINISH`` (ECDHE-secp256r1 / AES-256-GCM
+  secured session)
+* one AEAD-protected app message ("ping" → "pong") followed by
+  ``END_SESSION``
+
+The crypto backend used is ``CONFIG_LIBSPDM_CRYPTO_MBEDTLS=y``,
+running the vendored mbedTLS 3.6.5 LTS sources. The DMTF sample
+ECDSA-P256 certificate chains and keys are embedded via
+``libspdm_zephyr_secret_blob_register()`` (see
+``samples/common/sample_ecp256.{c,h}`` and
+``include/libspdm/zephyr/secret_blob.h``).
+
+Building with ``CONFIG_LIBSPDM_CRYPTO_NULL=y`` instead skips the
+authentication and session steps and only exercises the
+algorithm-negotiation phase — useful for early bringup on a new
+board / wiring.
 
 Wiring
 ******
@@ -60,10 +73,18 @@ Expected output
 
 .. code-block:: console
 
-   [00:00:00.123] <inf> spdm_requester_i3c: SPDM requester (libspdm + libmctp + I3C) on npcx4m8f_evb
-   [00:00:00.124] <inf> spdm_requester_i3c: local EID=20, peer EID=11
-   [00:00:00.125] <inf> spdm_requester_i3c: issuing GET_VERSION
-   [00:00:00.130] <inf> spdm_requester_i3c: GET_VERSION ok
-   [00:00:00.131] <inf> spdm_requester_i3c: issuing GET_CAPABILITIES + NEGOTIATE_ALGORITHMS
-   [00:00:00.137] <inf> spdm_requester_i3c: GET_CAPABILITIES + NEGOTIATE_ALGORITHMS ok
-   [00:00:00.138] <inf> spdm_requester_i3c: *** SPDM handshake (version/caps/algs) PASSED ***
+   [00:00:02.586] <inf> spdm_requester_i3c: issuing GET_VERSION
+   [00:00:02.590] <inf> spdm_requester_i3c: GET_VERSION ok
+   [00:00:02.590] <inf> spdm_requester_i3c: issuing GET_CAPABILITIES + NEGOTIATE_ALGORITHMS
+   [00:00:02.602] <inf> spdm_requester_i3c: GET_CAPABILITIES + NEGOTIATE_ALGORITHMS ok
+   [00:00:02.609] <inf> spdm_requester_i3c: GET_DIGESTS ok, slot_mask=0x01
+   [00:00:05.231] <inf> spdm_requester_i3c: GET_CERTIFICATE ok, chain_size=1390
+   [00:00:06.892] <inf> spdm_requester_i3c: CHALLENGE_AUTH ok
+   [00:00:06.892] <inf> spdm_requester_i3c: *** SPDM authenticated handshake PASSED ***
+   [00:00:06.893] <inf> spdm_requester_i3c: starting secure session + ping/pong
+   [00:00:08.5xx] <inf> spdm_requester_i3c: *** SPDM session ping/pong PASSED ***
+
+The crypto-heavy phases (~4-5 s total of ``CHALLENGE_AUTH`` plus
+``KEY_EXCHANGE``/``FINISH``) are dominated by software ECDSA-P256
+and ECDHE on the Cortex-M4F core — the npcx4m8f has no Zephyr-
+visible crypto accelerator.
