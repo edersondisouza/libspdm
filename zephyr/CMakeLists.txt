@@ -205,13 +205,58 @@ endif()
 # Crypto backend
 # ----------------------------------------------------------------------------
 if(CONFIG_LIBSPDM_CRYPTO_MBEDTLS)
-  # Reuse libspdm's cryptlib_mbedtls, but exclude the sys_call/ wrappers:
-  # on Zephyr we let mbedtls use libc malloc directly and we never call
-  # the my_printf/my_snprintf stubs (no MBEDTLS_PLATFORM_*_ALT enabled).
+  # Zephyr v4.4 ships mbedtls 4.x + TF-PSA-Crypto, which removed the
+  # legacy mbedtls_*_C API surface that libspdm's cryptlib_mbedtls is
+  # written against (mbedtls_hkdf, mbedtls_ecdh_*, mbedtls_oid_*, ...).
+  # So we don't use Zephyr's mbedtls module here at all -- we build
+  # libspdm's bundled mbedtls 3.6.5 LTS directly as part of this
+  # zephyr_library, with libspdm's own MBEDTLS_CONFIG_FILE.
+  set(LIBSPDM_MBEDTLS_DIR ${LIBSPDM_DIR}/os_stub/mbedtlslib/mbedtls)
+
+  file(GLOB LIBSPDM_MBEDTLS_LIB_SRCS
+       ${LIBSPDM_MBEDTLS_DIR}/library/*.c)
+  # No threading or TLS protocol code -- libspdm uses only the crypto and
+  # x509 facades. Filtering out the SSL/threading sources avoids dragging
+  # in pthread / errno wrappers we'd otherwise have to stub.
+  list(FILTER LIBSPDM_MBEDTLS_LIB_SRCS EXCLUDE REGEX "/(ssl|net|debug|threading|timing|version)[^/]*\\.c$")
+  zephyr_library_sources(${LIBSPDM_MBEDTLS_LIB_SRCS})
+
+  # Point every translation unit (libspdm + bundled mbedtls + sys_call
+  # wrappers) at the same libspdm-curated mbedtls config so the
+  # MBEDTLS_PLATFORM_*_MACRO redirects to my_calloc/my_free/my_printf/
+  # my_snprintf are consistent everywhere.
+  zephyr_library_compile_definitions(
+    MBEDTLS_CONFIG_FILE="libspdm_mbedtls_config.h"
+    MBEDTLS_PLATFORM_MS_TIME_ALT
+  )
+  zephyr_library_include_directories(
+    ${LIBSPDM_DIR}/os_stub/mbedtlslib/include
+    ${LIBSPDM_DIR}/os_stub/mbedtlslib/include/mbedtls
+    ${LIBSPDM_MBEDTLS_DIR}/include
+    ${LIBSPDM_MBEDTLS_DIR}/library
+  )
+
+  # libspdm's mbedtls config sets MBEDTLS_PLATFORM_{CALLOC,FREE}_MACRO
+  # to my_{calloc,free} and MBEDTLS_PLATFORM_{PRINTF,SNPRINTF}_MACRO to
+  # my_{printf,snprintf}. Pull in those wrappers so the bundled mbedtls
+  # actually links.
+  file(GLOB CRYPTLIB_MBEDTLS_SYSCALL_SRCS
+       ${LIBSPDM_DIR}/os_stub/cryptlib_mbedtls/sys_call/*.c)
+  # crt_wrapper_host.c stubs my_printf/my_snprintf with LIBSPDM_ASSERT
+  # (libspdm never invokes them); mem_allocation.c implements
+  # my_calloc/my_free on top of libspdm's malloclib.
+  zephyr_library_sources(${CRYPTLIB_MBEDTLS_SYSCALL_SRCS})
+
+  # Zephyr-side glue for the vendored mbedtls (mbedtls_ms_time on
+  # k_uptime_get; matches MBEDTLS_PLATFORM_MS_TIME_ALT above).
+  zephyr_library_sources(${CMAKE_CURRENT_LIST_DIR}/src/mbedtls_zephyr_glue.c)
+
+  # libspdm's wrappers around the mbedtls API.
   file(GLOB_RECURSE CRYPTLIB_MBEDTLS_SRCS
        ${LIBSPDM_DIR}/os_stub/cryptlib_mbedtls/*.c)
   list(FILTER CRYPTLIB_MBEDTLS_SRCS EXCLUDE REGEX "/sys_call/")
-  # Skip PQC sources for now (require ML-DSA / ML-KEM in Zephyr mbedtls).
+  # Skip PQC sources for now (would require ML-DSA / ML-KEM, which the
+  # bundled mbedtls 3.6.5 doesn't carry).
   list(FILTER CRYPTLIB_MBEDTLS_SRCS EXCLUDE REGEX "_pqc\\.c$")
   list(FILTER CRYPTLIB_MBEDTLS_SRCS EXCLUDE REGEX "(mldsa|mlkem|slhdsa)")
   zephyr_library_sources(${CRYPTLIB_MBEDTLS_SRCS})
@@ -220,8 +265,15 @@ if(CONFIG_LIBSPDM_CRYPTO_MBEDTLS)
     ${LIBSPDM_DIR}/os_stub/cryptlib_mbedtls
   )
 
-  # mbedtls library target is provided by Zephyr's mbedtls module.
-  zephyr_library_link_libraries(mbedTLS)
+  # The bundled mbedtls trips on a handful of warnings Zephyr promotes
+  # to errors. Scope these to the libspdm zephyr_library so they don't
+  # leak to the rest of the application.
+  zephyr_library_compile_options(
+    -Wno-cast-qual
+    -Wno-redundant-decls
+    -Wno-unused-but-set-variable
+    -Wno-unused-function
+  )
 elseif(CONFIG_LIBSPDM_CRYPTO_NULL)
   file(GLOB_RECURSE CRYPTLIB_NULL_SRCS
        ${LIBSPDM_DIR}/os_stub/cryptlib_null/*.c)

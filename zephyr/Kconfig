@@ -24,12 +24,14 @@ choice LIBSPDM_CRYPTO_BACKEND
 	default LIBSPDM_CRYPTO_MBEDTLS
 
 config LIBSPDM_CRYPTO_MBEDTLS
-	bool "mbedTLS (Zephyr module)"
-	select MBEDTLS
+	bool "mbedTLS (vendored libspdm 3.6.5 LTS)"
 	help
-	  Use Zephyr's mbedTLS module as the libspdm crypto backend.
-	  See zephyr/Kconfig.mbedtls for the additional mbedTLS
-	  features auto-selected by this option.
+	  Use the mbedTLS 3.6.5 LTS source tree vendored under
+	  libspdm/os_stub/mbedtlslib/ as the libspdm crypto backend.
+	  Zephyr's own mbedTLS module (which ships v4.x + TF-PSA-Crypto)
+	  is intentionally NOT used because mbedTLS 4 removed the legacy
+	  mbedtls_*_C API surface that libspdm's cryptlib_mbedtls relies
+	  on. See zephyr/CMakeLists.txt for the build wiring.
 
 config LIBSPDM_CRYPTO_NULL
 	bool "Null crypto (compile-only, will fail at runtime)"
@@ -135,7 +137,8 @@ config LIBSPDM_MAX_CERT_CHAIN_SIZE
 	int "Maximum certificate chain size (bytes)"
 	default 4096
 
-# mbedTLS feature requirements pulled in when LIBSPDM_CRYPTO_MBEDTLS=y.
-rsource "Kconfig.mbedtls"
+# When LIBSPDM_CRYPTO_MBEDTLS=y, libspdm uses its own vendored mbedTLS
+# 3.6.5 source tree (see zephyr/CMakeLists.txt), with libspdm's
+# pre-curated MBEDTLS_CONFIG_FILE. No Kconfig knobs are needed.
 
 endif # LIBSPDM
