@@ -15,9 +15,10 @@ Status
 The module is in early porting state. What works today:
 
 * SPDM 1.0 / 1.1 / 1.2 message framing and state machines, requester
-  and responder, exercised through ``GET_VERSION`` /
-  ``GET_CAPABILITIES`` / ``NEGOTIATE_ALGORITHMS`` on ``qemu_x86_64``
-  (see ``samples/spdm_loopback``).
+  and responder, exercised end-to-end through ``GET_VERSION`` /
+  ``GET_CAPABILITIES`` / ``NEGOTIATE_ALGORITHMS`` / ``GET_DIGESTS`` /
+  ``GET_CERTIFICATE`` / ``CHALLENGE_AUTH`` on ``qemu_x86_64`` (see
+  ``samples/spdm_loopback``).
 * MCTP transport binding (``libspdm_transport_mctp_*``) — bridged to
   Zephyr's ``libmctp`` via
   ``include/libspdm/zephyr/spdm_mctp_io.h``. Builds cleanly against
@@ -26,11 +27,11 @@ The module is in early porting state. What works today:
   ``samples/spdm_responder_i3c``); also drives the in-process
   loopback sample on ``qemu_x86_64``.
 * Null crypto backend (compile/link-clean, useful for early bringup).
-* mbedTLS crypto backend wired up against Zephyr's ``mbedtls`` module
-  *at the build-system level*. End-to-end exercise of the mbedTLS
-  backend on Zephyr — i.e. through ``CHALLENGE_AUTH`` and
-  ``GET_MEASUREMENTS`` — has not been validated yet (see
-  *Known limitations* below).
+* mbedTLS crypto backend, built directly from the mbedTLS 3.6.5 LTS
+  source tree vendored under ``os_stub/mbedtlslib/`` (Zephyr's own
+  mbedTLS module is not used — see *Known limitations* for why).
+  End-to-end ECDSA-P256 ``CHALLENGE_AUTH`` with X.509 chain
+  verification passes on ``qemu_x86_64``.
 
 Not yet supported:
 
@@ -52,12 +53,12 @@ Layout
   zephyr/
   ├── module.yml                    # tells Zephyr build system this is a module
   ├── Kconfig                       # CONFIG_LIBSPDM_* options
-  ├── Kconfig.mbedtls               # mbedTLS feature requirements
   ├── CMakeLists.txt                # builds the libspdm zephyr_library
   ├── include/libspdm/zephyr/
   │   ├── secret_blob.h             # registry API for embedded keys/certs
   │   └── spdm_mctp_io.h            # libspdm <-> libmctp bridge API
   ├── src/
+  │   ├── mbedtls_zephyr_glue.c     # mbedtls_time / mbedtls_ms_time hooks
   │   ├── secret_blob.c             # secret-blob registry + setcert stubs
   │   └── spdm_mctp_io.c            # libspdm <-> libmctp bridge implementation
   └── samples/
@@ -190,23 +191,31 @@ works without changes to the bridge itself. Typical wiring:
 Known limitations
 -----------------
 
-* **mbedTLS user-config not yet provided.** Zephyr v4.4 ships mbedTLS
-  v4.x + TF-PSA-Crypto, where many legacy ``MBEDTLS_*_C`` switches are
-  no longer real Kconfigs. ``Kconfig.mbedtls`` declares the libspdm
-  feature requirements as plain bools so the module compiles cleanly,
-  but the mbedTLS feature set actually enabled is whatever Zephyr's
-  default config selects. To do a full SPDM handshake (e.g. ECDSA
-  P-256 signature verification in ``CHALLENGE_AUTH``) the application
-  most likely has to point ``CONFIG_MBEDTLS_USER_CONFIG_FILE`` at a
-  ``mbedtls_user_config_libspdm.h`` that explicitly enables the
-  primitives libspdm needs.
-* **Hardware run goes only as far as the null crypto backend
-  allows.** The handshake has been validated end-to-end on two
-  ``npcx4m8f_evb`` boards through ``GET_VERSION`` /
-  ``GET_CAPABILITIES`` / ``NEGOTIATE_ALGORITHMS``. Reaching
-  ``CHALLENGE_AUTH`` and ``GET_MEASUREMENTS`` requires the mbedTLS
-  user-config above plus an embedded certificate chain registered
-  via the device-secret library.
+* **mbedTLS source is vendored, not shared with Zephyr's module.**
+  Zephyr v4.4 ships mbedTLS v4.x + TF-PSA-Crypto, which removed the
+  legacy ``mbedtls_*_C`` API surface (``mbedtls_hkdf``,
+  ``mbedtls_ecdh_*``, ``mbedtls_oid_*`` …) that libspdm's
+  ``cryptlib_mbedtls`` is written against. Rather than rewrite the
+  cryptlib for the PSA-only API, ``CONFIG_LIBSPDM_CRYPTO_MBEDTLS=y``
+  compiles the mbedTLS 3.6.5 LTS source tree already vendored under
+  ``os_stub/mbedtlslib/`` directly into the libspdm ``zephyr_library``,
+  using libspdm's own pre-curated ``MBEDTLS_CONFIG_FILE``. An
+  application that needs to use Zephyr's own mbedTLS module for
+  *non-libspdm* code (e.g. its own TLS stack) will therefore link two
+  separate copies of mbedTLS — workable, but worth knowing.
+* **Wall-clock time is faked.** Zephyr has no battery-backed
+  real-time clock by default, but X.509 validity-period checks need a
+  wall clock. ``zephyr/src/mbedtls_zephyr_glue.c`` installs a constant
+  ``mbedtls_time`` (mid-2025) that sits inside the validity window of
+  the DMTF sample certificates. Real deployments must replace this
+  with a meaningful time source.
+* **Hardware run still uses the null crypto backend.** The handshake
+  has been validated end-to-end on two ``npcx4m8f_evb`` boards through
+  ``GET_VERSION`` / ``GET_CAPABILITIES`` / ``NEGOTIATE_ALGORITHMS``.
+  The mbedTLS backend has only been exercised on ``qemu_x86_64`` so
+  far; flipping the I3C samples to ``CONFIG_LIBSPDM_CRYPTO_MBEDTLS=y``
+  on the 384 KiB-flash / 114 KiB-RAM ``npcx4m8f`` requires further
+  footprint work.
 * **No PQC.** All PQC code paths (ML-DSA, ML-KEM, SLH-DSA) are
   compiled out by forcing the relevant ``LIBSPDM_*_SUPPORT`` knobs
   to 0 in the module CMakeLists; the optional GET / SET KEY_PAIR_INFO

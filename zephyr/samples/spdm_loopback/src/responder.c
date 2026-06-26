@@ -20,6 +20,7 @@
 
 #include "library/spdm_common_lib.h"
 #include "library/spdm_responder_lib.h"
+#include "internal/libspdm_device_secret_lib.h"
 #include "hal/library/memlib.h"
 #include "industry_standard/spdm.h"
 
@@ -27,6 +28,38 @@
 
 void *responder_spdm_context;
 void *responder_scratch;
+
+static bool install_responder_cert_chain(void *ctx)
+{
+    libspdm_data_parameter_t parameter;
+    void *cert_chain = NULL;
+    size_t cert_chain_size = 0;
+    uint8_t u8;
+    bool res;
+
+    res = libspdm_read_responder_public_certificate_chain(
+        SPDM_ALGORITHMS_BASE_HASH_ALGO_TPM_ALG_SHA_256,
+        SPDM_ALGORITHMS_BASE_ASYM_ALGO_TPM_ALG_ECDSA_ECC_NIST_P256,
+        &cert_chain, &cert_chain_size, NULL, NULL);
+    if (!res || cert_chain == NULL) {
+        printk("[responder] failed to load responder cert chain\n");
+        return false;
+    }
+
+    libspdm_zero_mem(&parameter, sizeof(parameter));
+    parameter.location = LIBSPDM_DATA_LOCATION_LOCAL;
+    parameter.additional_data[0] = 0; /* slot 0 */
+    libspdm_set_data(ctx, LIBSPDM_DATA_LOCAL_PUBLIC_CERT_CHAIN,
+                     &parameter, cert_chain, cert_chain_size);
+    /* libspdm_set_data stores the pointer for LOCAL_PUBLIC_CERT_CHAIN
+     * (no internal copy), so cert_chain must outlive the SPDM
+     * context. Intentionally leaked for the lifetime of the program. */
+
+    u8 = 1 << 0; /* only slot 0 populated */
+    libspdm_set_data(ctx, LIBSPDM_DATA_LOCAL_SUPPORTED_SLOT_MASK,
+                     &parameter, &u8, sizeof(u8));
+    return true;
+}
 
 static void configure_responder(void *ctx)
 {
@@ -108,6 +141,9 @@ void responder_thread_main(void *a, void *b, void *c)
 
     mock_transport_install(responder_spdm_context, t);
     configure_responder(responder_spdm_context);
+    if (!install_responder_cert_chain(responder_spdm_context)) {
+        return;
+    }
 
     scratch_size = libspdm_get_sizeof_required_scratch_buffer(
         responder_spdm_context);

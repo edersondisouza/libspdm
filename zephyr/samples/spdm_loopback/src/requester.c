@@ -25,6 +25,7 @@
 
 #include "library/spdm_common_lib.h"
 #include "library/spdm_requester_lib.h"
+#include "internal/libspdm_device_secret_lib.h"
 #include "hal/library/memlib.h"
 #include "industry_standard/spdm.h"
 
@@ -32,6 +33,50 @@
 
 void *requester_spdm_context;
 void *requester_scratch;
+
+static bool install_peer_root_cert(void *ctx)
+{
+    libspdm_data_parameter_t parameter;
+    void *cert_chain = NULL;
+    size_t cert_chain_size = 0;
+    void *hash = NULL;
+    size_t hash_size = 0;
+    const uint8_t *root_cert;
+    size_t root_cert_size;
+    bool res;
+
+    res = libspdm_read_responder_public_certificate_chain(
+        SPDM_ALGORITHMS_BASE_HASH_ALGO_TPM_ALG_SHA_256,
+        SPDM_ALGORITHMS_BASE_ASYM_ALGO_TPM_ALG_ECDSA_ECC_NIST_P256,
+        &cert_chain, &cert_chain_size, &hash, &hash_size);
+    if (!res || cert_chain == NULL) {
+        printk("[requester] cannot load responder cert chain "
+               "(needed only to extract root cert)\n");
+        return false;
+    }
+
+    /* Skip the libspdm cert-chain header (length + reserved + root
+     * hash) to land on the first DER-encoded certificate. */
+    res = libspdm_x509_get_cert_from_cert_chain(
+        (uint8_t *)cert_chain + sizeof(spdm_cert_chain_t) + hash_size,
+        cert_chain_size - sizeof(spdm_cert_chain_t) - hash_size,
+        0, &root_cert, &root_cert_size);
+    if (!res) {
+        printk("[requester] cert-chain root extract failed\n");
+        free(cert_chain);
+        return false;
+    }
+
+    libspdm_zero_mem(&parameter, sizeof(parameter));
+    parameter.location = LIBSPDM_DATA_LOCATION_LOCAL;
+    libspdm_set_data(ctx, LIBSPDM_DATA_PEER_PUBLIC_ROOT_CERT,
+                     &parameter, (void *)root_cert, root_cert_size);
+    /* libspdm_set_data stores the pointer for PEER_PUBLIC_ROOT_CERT
+     * (no internal copy), and root_cert aliases into cert_chain. The
+     * allocation must outlive the SPDM context, so we intentionally
+     * leak it for the lifetime of the program. */
+    return true;
+}
 
 static void configure_requester(void *ctx)
 {
@@ -105,6 +150,9 @@ void requester_thread_main(void *a, void *b, void *c)
 
     mock_transport_install(requester_spdm_context, t);
     configure_requester(requester_spdm_context);
+    if (!install_peer_root_cert(requester_spdm_context)) {
+        return;
+    }
 
     scratch_size = libspdm_get_sizeof_required_scratch_buffer(
         requester_spdm_context);
@@ -137,5 +185,52 @@ void requester_thread_main(void *a, void *b, void *c)
     }
     printk("[requester] GET_CAPABILITIES + NEGOTIATE_ALGORITHMS ok\n");
 
-    printk("[requester] *** SPDM handshake (version/caps/algs) PASSED ***\n");
+    /* GET_DIGESTS -- pulls a SHA-256 over the responder's cert chain
+     * for each populated slot. */
+    {
+        uint8_t slot_mask = 0;
+        uint8_t total_digest[LIBSPDM_MAX_HASH_SIZE * SPDM_MAX_SLOT_COUNT];
+
+        status = libspdm_get_digest(requester_spdm_context, NULL,
+                                    &slot_mask, total_digest);
+        if (LIBSPDM_STATUS_IS_ERROR(status)) {
+            printk("[requester] GET_DIGESTS failed: 0x%x\n", status);
+            return;
+        }
+        printk("[requester] GET_DIGESTS ok, slot_mask=0x%02x\n", slot_mask);
+    }
+
+    /* GET_CERTIFICATE slot 0 -- exercises the X.509 verification path
+     * end to end against the PEER_PUBLIC_ROOT_CERT we installed. */
+    {
+        static uint8_t cert_buf[0x800];
+        size_t cert_chain_size = sizeof(cert_buf);
+
+        status = libspdm_get_certificate(requester_spdm_context, NULL,
+                                         0, &cert_chain_size, cert_buf);
+        if (LIBSPDM_STATUS_IS_ERROR(status)) {
+            printk("[requester] GET_CERTIFICATE failed: 0x%x\n", status);
+            return;
+        }
+        printk("[requester] GET_CERTIFICATE ok, chain_size=%zu\n",
+               cert_chain_size);
+    }
+
+    /* CHALLENGE_AUTH slot 0 -- the responder signs a nonce with its
+     * ECDSA-P256 device key; the requester verifies the signature
+     * with the leaf cert it just retrieved. */
+    {
+        uint8_t slot_mask = 0;
+
+        status = libspdm_challenge(requester_spdm_context, NULL, 0,
+                                   SPDM_CHALLENGE_REQUEST_NO_MEASUREMENT_SUMMARY_HASH,
+                                   NULL, &slot_mask);
+        if (LIBSPDM_STATUS_IS_ERROR(status)) {
+            printk("[requester] CHALLENGE_AUTH failed: 0x%x\n", status);
+            return;
+        }
+        printk("[requester] CHALLENGE_AUTH ok\n");
+    }
+
+    printk("[requester] *** SPDM authenticated handshake PASSED ***\n");
 }

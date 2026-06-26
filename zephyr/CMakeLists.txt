@@ -228,6 +228,7 @@ if(CONFIG_LIBSPDM_CRYPTO_MBEDTLS)
   zephyr_library_compile_definitions(
     MBEDTLS_CONFIG_FILE="libspdm_mbedtls_config.h"
     MBEDTLS_PLATFORM_MS_TIME_ALT
+    MBEDTLS_PLATFORM_TIME_ALT
   )
   zephyr_library_include_directories(
     ${LIBSPDM_DIR}/os_stub/mbedtlslib/include

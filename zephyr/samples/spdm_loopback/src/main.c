@@ -7,7 +7,10 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 
+#include <libspdm/zephyr/secret_blob.h>
+
 #include "spdm_loopback.h"
+#include "sample_ecp256.h"
 
 /* The two channels making up the loopback link. */
 static struct mock_channel req_to_rsp;
@@ -27,6 +30,14 @@ int main(void)
 {
     printk("\nlibspdm Zephyr loopback demo\n");
     printk("============================\n");
+
+    /* Make the ECDSA-P256 sample cert chains and matching device key
+     * available to the libspdm sample device-secret library via
+     * libspdm_read_input_file(). */
+    if (libspdm_zephyr_secret_blob_register(sample_ecp256_blobs) != 0) {
+        printk("secret blob registration failed\n");
+        return -1;
+    }
 
     mock_channel_init(&req_to_rsp);
     mock_channel_init(&rsp_to_req);
