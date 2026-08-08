@@ -1688,7 +1688,9 @@ typedef struct {
  * RFC9909
  * The PQC slhdsa public key info len is 13.
  **/
+#ifndef SPDM_MAX_PUBLIC_KEY_INFO_LEN
 #define SPDM_MAX_PUBLIC_KEY_INFO_LEN 65535
+#endif
 
 /* SPDM GET_KEY_PAIR_INFO request */
 typedef struct {
