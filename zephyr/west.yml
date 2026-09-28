@@ -1,0 +1,45 @@
+# West manifest for building libspdm's Zephyr samples.
+#
+# The libspdm repository is the manifest repository (west topology T2):
+#
+#   west init -m <libspdm-fork-url> --mf zephyr/west.yml spdm-ws
+#   cd spdm-ws && west update
+#   git -C libspdm submodule update --init os_stub/mbedtlslib/mbedtls
+#
+# West does not handle submodules of the manifest repository itself,
+# hence the last step; it fetches only the mbedTLS tree the module
+# builds, not libspdm's other (large) submodules.
+#
+# Resulting layout:
+#
+#   spdm-ws/
+#   |-- .west/
+#   |-- libspdm/   this repository
+#   |-- zephyr/
+#   `-- modules/   only the Zephyr modules the samples need
+#
+# Existing Zephyr workspaces don't need this file: see zephyr/README.rst.
+
+manifest:
+  version: "0.13"
+
+  remotes:
+    - name: zephyrproject-rtos
+      url-base: https://github.com/zephyrproject-rtos
+
+  projects:
+    - name: zephyr
+      remote: zephyrproject-rtos
+      revision: main
+      import:
+        name-allowlist:
+          - cmsis
+          - cmsis_6
+          - hal_nuvoton
+          - hal_nxp
+          - libmctp
+          - picolibc
+          - segger
+
+  self:
+    path: libspdm

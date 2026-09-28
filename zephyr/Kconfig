@@ -34,6 +34,10 @@ config LIBSPDM_CRYPTO_MBEDTLS
 	  mbedtls_*_C API surface that libspdm's cryptlib_mbedtls relies
 	  on. See zephyr/CMakeLists.txt for the build wiring.
 
+	  Zephyr has no wall clock, so X.509 validity checks see the Unix
+	  epoch until the application installs a time source with
+	  libspdm_zephyr_set_wallclock() (libspdm_zephyr.h).
+
 config LIBSPDM_CRYPTO_NULL
 	bool "Null crypto (compile-only, will fail at runtime)"
 
@@ -51,9 +55,8 @@ config LIBSPDM_SECRET_LIB_SAMPLE
 	  os_stub/include/internal/libspdm_device_secret_lib.h
 	  (libspdm_read_input_file, libspdm_write_output_file,
 	  libspdm_dump_hex_str) plus the SetCert hooks, exactly as
-	  spdm-emu does on a hosted OS. The integration layer that
-	  wraps this module is expected to carry them; see the
-	  spdm-zephyr repository for reference implementations.
+	  spdm-emu does on a hosted OS. See zephyr/samples/common for
+	  sample implementations.
 
 menu "Transports"
 
@@ -65,26 +68,6 @@ config LIBSPDM_TRANSPORT_MCTP
 	  message codec; moving the encoded messages over a real bus
 	  is the integrator's job, through libspdm's
 	  device_send_message / device_receive_message hooks.
-
-endmenu
-
-menu "Crypto backend options"
-
-config LIBSPDM_MBEDTLS_PLATFORM_TIME_ALT
-	bool "Integrator supplies the mbedTLS platform time hooks"
-	depends on LIBSPDM_CRYPTO_MBEDTLS
-	default y
-	help
-	  Build the vendored mbedTLS with MBEDTLS_PLATFORM_TIME_ALT and
-	  MBEDTLS_PLATFORM_MS_TIME_ALT set. Zephyr has no hosted time(),
-	  so mbedtls_time() and mbedtls_ms_time() must come from
-	  outside this module; the build will fail to link if nothing
-	  defines them. Where the wall clock ultimately comes from (an
-	  RTC, SNTP, a secure time service) is platform policy, which is
-	  why it is not answered here. See the spdm-zephyr repository
-	  for an implementation.
-
-	  Say n only if you have arranged for a hosted time() to exist.
 
 endmenu
 

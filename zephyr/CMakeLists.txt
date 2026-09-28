@@ -55,6 +55,7 @@ zephyr_compile_definitions(${LIBSPDM_PORT_DEFS})
 
 # Expose the public headers to anything that links against the module.
 zephyr_include_directories(
+  ${CMAKE_CURRENT_LIST_DIR}/include
   ${LIBSPDM_DIR}/include
   ${LIBSPDM_DIR}/include/hal
   ${LIBSPDM_DIR}/os_stub/include
@@ -146,17 +147,13 @@ if(CONFIG_LIBSPDM_CRYPTO_MBEDTLS)
   # my_free/my_printf/my_snprintf are consistent everywhere. That config
   # leaves the two *_TIME_ALT flags commented out because it assumes a
   # hosted time(); Zephyr has none, so enable them here. The matching
-  # mbedtls_time()/mbedtls_ms_time() implementations are the
-  # integrator's to supply -- see CONFIG_LIBSPDM_MBEDTLS_PLATFORM_TIME_ALT.
+  # hooks are in src/mbedtls_time.c.
   zephyr_library_compile_definitions(
     MBEDTLS_CONFIG_FILE="libspdm_mbedtls_config.h"
+    MBEDTLS_PLATFORM_MS_TIME_ALT
+    MBEDTLS_PLATFORM_TIME_ALT
   )
-  if(CONFIG_LIBSPDM_MBEDTLS_PLATFORM_TIME_ALT)
-    zephyr_library_compile_definitions(
-      MBEDTLS_PLATFORM_MS_TIME_ALT
-      MBEDTLS_PLATFORM_TIME_ALT
-    )
-  endif()
+  zephyr_library_sources(${CMAKE_CURRENT_LIST_DIR}/src/mbedtls_time.c)
   zephyr_library_include_directories(
     ${LIBSPDM_DIR}/os_stub/mbedtlslib/include
     ${LIBSPDM_DIR}/os_stub/mbedtlslib/include/mbedtls
